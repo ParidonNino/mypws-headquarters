@@ -1,4 +1,5 @@
 import {
+  createNotionTaskResponse,
   getNotionTasksResponse,
   updateNotionTaskResponse,
 } from "../../../../lib/notion-tasks";
@@ -13,4 +14,12 @@ export async function GET() {
 
 export async function PATCH(request: Request) {
   return updateNotionTaskResponse(request, process.env.NOTION_TOKEN);
+}
+
+export async function POST(request: Request) {
+  return createNotionTaskResponse(
+    request,
+    process.env.NOTION_TOKEN,
+    process.env.NOTION_ROADMAP_DATA_SOURCE_ID,
+  );
 }

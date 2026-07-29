@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  createNotionTaskResponse,
   getNotionTasksResponse,
   updateNotionWorkblockResponse,
 } from "../lib/notion-tasks.ts";
@@ -199,6 +200,74 @@ test("still closes and records a real Workblocks page", async () => {
       `https://api.notion.com/v1/pages/${workblockId}`,
     );
     assert.equal(requests[0].body.properties.Werkstatus.select.name, "Pauze");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("creates a new roadmap ticket with its selected epic", async () => {
+  const originalFetch = globalThis.fetch;
+  let notionBody;
+  globalThis.fetch = async (_url, init) => {
+    notionBody = JSON.parse(init.body);
+    return Response.json({
+      id: "39641e9d-4d52-8999-a73a-ff053b6c5c4c",
+      url: "https://app.notion.com/39641e9d4d528999a73aff053b6c5c4c",
+    });
+  };
+
+  try {
+    const response = await createNotionTaskResponse(
+      request({
+        title: "Nieuwe migratietaak",
+        taskType: "Subtask",
+        priority: "High",
+        estimate: 3.5,
+        nextAction: "Eerst de bestaande migraties nalopen",
+        parentEpicId: taskId,
+        epicTitle: "Refactor Datafetcher service",
+        workDate: "2026-07-30T09:00:00.000Z",
+      }),
+      "secret",
+      "roadmap",
+    );
+    const payload = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(payload.task.title, "Nieuwe migratietaak");
+    assert.equal(payload.task.epic, "Refactor Datafetcher service");
+    assert.equal(payload.task.day, "tomorrow");
+    assert.equal(notionBody.parent.data_source_id, "roadmap");
+    assert.equal(
+      notionBody.properties["Parent task"].relation[0].id,
+      taskId,
+    );
+    assert.equal(notionBody.properties.Status.select.name, "Todo");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("rejects an empty roadmap ticket before calling Notion", async () => {
+  const originalFetch = globalThis.fetch;
+  let fetchCalls = 0;
+  globalThis.fetch = async () => {
+    fetchCalls += 1;
+    return Response.json({});
+  };
+
+  try {
+    const response = await createNotionTaskResponse(
+      request({
+        title: " ",
+        taskType: "Subtask",
+        priority: "Medium",
+        estimate: 2,
+      }),
+      "secret",
+      "roadmap",
+    );
+    assert.equal(response.status, 400);
+    assert.equal(fetchCalls, 0);
   } finally {
     globalThis.fetch = originalFetch;
   }

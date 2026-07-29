@@ -223,10 +223,31 @@ export async function getNotionTasksResponse(
         };
       });
 
+    const epics = pages
+      .filter(
+        (page) => selectName(page.properties?.["Task type"]) === "Epic",
+      )
+      .map((page) => {
+        const properties = page.properties ?? {};
+        return {
+          id: page.id,
+          url: page.url,
+          title: plainText(properties.Task) || "Naamloze epic",
+          status: selectName(properties.Status) || "Backlog",
+          priority: selectName(properties.Priority) || "Medium",
+          plannedStart: properties["Planned start"]?.date?.start ?? null,
+          plannedEnd: properties["Planned end"]?.date?.start ?? null,
+          progress: properties["Progress %"]?.number ?? 0,
+          estimate: properties["Estimate hours"]?.number ?? 0,
+          nextAction: plainText(properties["Next action"]),
+        };
+      });
+
     return Response.json({
       configured: true,
       syncedAt: new Date().toISOString(),
       tasks,
+      epics,
     });
   } catch (error) {
     return Response.json(
@@ -235,6 +256,156 @@ export async function getNotionTasksResponse(
         error: "Notion-koppeling mislukt",
         detail: error instanceof Error ? error.message : "Onbekende fout",
         tasks: [],
+      },
+      { status: 500 },
+    );
+  }
+}
+
+export async function createNotionTaskResponse(
+  request: Request,
+  token?: string,
+  configuredDataSourceId?: string,
+) {
+  if (!token || token === "PLAK_HIER_DE_NOTION_SLEUTEL") {
+    return Response.json(
+      { configured: false, error: "NOTION_TOKEN ontbreekt" },
+      { status: 503 },
+    );
+  }
+
+  try {
+    const payload = (await request.json()) as {
+      title?: unknown;
+      taskType?: unknown;
+      priority?: unknown;
+      estimate?: unknown;
+      nextAction?: unknown;
+      parentEpicId?: unknown;
+      epicTitle?: unknown;
+      workDate?: unknown;
+    };
+
+    if (typeof payload.title !== "string" || !payload.title.trim()) {
+      return Response.json({ error: "Geef de taak een titel" }, { status: 400 });
+    }
+    if (payload.taskType !== "Feature" && payload.taskType !== "Subtask") {
+      return Response.json({ error: "Ongeldig taaktype" }, { status: 400 });
+    }
+    if (
+      payload.priority !== "Critical" &&
+      payload.priority !== "High" &&
+      payload.priority !== "Medium" &&
+      payload.priority !== "Low"
+    ) {
+      return Response.json({ error: "Ongeldige prioriteit" }, { status: 400 });
+    }
+    if (
+      typeof payload.estimate !== "number" ||
+      !Number.isFinite(payload.estimate) ||
+      payload.estimate < 0 ||
+      payload.estimate > 1_000
+    ) {
+      return Response.json({ error: "Ongeldige inschatting" }, { status: 400 });
+    }
+    if (
+      payload.nextAction !== undefined &&
+      typeof payload.nextAction !== "string"
+    ) {
+      return Response.json(
+        { error: "Ongeldige volgende actie" },
+        { status: 400 },
+      );
+    }
+    if (
+      payload.parentEpicId !== undefined &&
+      payload.parentEpicId !== null &&
+      payload.parentEpicId !== "" &&
+      !validPageId(payload.parentEpicId)
+    ) {
+      return Response.json({ error: "Ongeldige epic" }, { status: 400 });
+    }
+    if (
+      payload.workDate !== undefined &&
+      payload.workDate !== null &&
+      (typeof payload.workDate !== "string" ||
+        Number.isNaN(Date.parse(payload.workDate)))
+    ) {
+      return Response.json({ error: "Ongeldige werkdatum" }, { status: 400 });
+    }
+
+    const title = payload.title.trim().slice(0, 160);
+    const nextAction =
+      typeof payload.nextAction === "string" ? payload.nextAction : "";
+    const properties: Record<string, unknown> = {
+      Task: { title: richText(title) },
+      "Task type": { select: { name: payload.taskType } },
+      Status: { select: { name: "Todo" } },
+      Priority: { select: { name: payload.priority } },
+      "Estimate hours": { number: payload.estimate },
+      "Next action": { rich_text: richText(nextAction) },
+    };
+
+    if (validPageId(payload.parentEpicId)) {
+      properties["Parent task"] = {
+        relation: [{ id: payload.parentEpicId }],
+      };
+    }
+    if (typeof payload.workDate === "string") {
+      properties["Work date"] = { date: { start: payload.workDate } };
+    }
+
+    const dataSourceId =
+      configuredDataSourceId || DEFAULT_ROADMAP_DATA_SOURCE_ID;
+    const response = await fetch("https://api.notion.com/v1/pages", {
+      method: "POST",
+      headers: notionHeaders(token),
+      body: JSON.stringify({
+        parent: { type: "data_source_id", data_source_id: dataSourceId },
+        properties,
+      }),
+    });
+    if (!response.ok) return notionError(response);
+
+    const page = (await response.json()) as NotionPage;
+    const workDate =
+      typeof payload.workDate === "string" ? payload.workDate : null;
+    const epicTitle =
+      typeof payload.epicTitle === "string" && payload.epicTitle.trim()
+        ? payload.epicTitle.trim().slice(0, 160)
+        : "Powerselect Roadmap";
+
+    return Response.json({
+      configured: true,
+      saved: true,
+      task: {
+        id: page.id,
+        url: page.url,
+        title,
+        epic: epicTitle,
+        estimate: payload.estimate,
+        plannedHours: null,
+        loggedSeconds: 0,
+        status: "ready",
+        notionStatus: "Todo",
+        day: dayKey(workDate ?? undefined),
+        workDate,
+        slot: workDate?.includes("T")
+          ? new Date(workDate).toLocaleTimeString("nl-NL", {
+              hour: "2-digit",
+              minute: "2-digit",
+            })
+          : undefined,
+        nextAction,
+        accent: "blue",
+      },
+    });
+  } catch (error) {
+    return Response.json(
+      {
+        configured: true,
+        error: "Notion-ticket aanmaken mislukt",
+        detail: error instanceof Error ? error.message : "Onbekende fout",
       },
       { status: 500 },
     );
