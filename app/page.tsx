@@ -318,6 +318,7 @@ export default function Home() {
   const [notionState, setNotionState] = useState<
     "loading" | "demo" | "connected" | "error"
   >("loading");
+  const [syncVersion, setSyncVersion] = useState(0);
   const [note, setNote] = useState(
     "Database-tabellen nalopen en bepalen welke velden vóór de migratie opgeschoond moeten worden.",
   );
@@ -351,6 +352,7 @@ export default function Home() {
   const filteredTasks = useMemo(() => {
     if (filter === "Alle epics") return tasks;
     if (filter === "Actieve epics") {
+      if (activeEpics.length === 0) return tasks;
       const activeIds = new Set(activeEpics.map((epic) => epic.id));
       return tasks.filter(
         (task) =>
@@ -368,7 +370,7 @@ export default function Home() {
           (task) =>
             !task.day &&
             task.status !== "done" &&
-            task.taskType === "Subtask",
+            task.taskType !== "Feature",
         )
         .sort((a, b) => {
           const priority = { Critical: 0, High: 1, Medium: 2, Low: 3 };
@@ -491,7 +493,7 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [syncVersion]);
 
   useEffect(() => {
     const savedPlan = window.localStorage.getItem(
@@ -558,6 +560,11 @@ export default function Home() {
   function setFeedback(state: SaveState, message: string) {
     setSaveState(state);
     setSaveMessage(message);
+  }
+
+  function refreshNotion() {
+    setNotionState("loading");
+    setSyncVersion((current) => current + 1);
   }
 
   function selectTask(task: Task) {
@@ -1075,7 +1082,11 @@ export default function Home() {
         </nav>
 
         <div className="top-actions">
-          <button className="sync-button">
+          <button
+            className="sync-button"
+            onClick={refreshNotion}
+            title="Klik om de taken opnieuw uit Notion te laden"
+          >
             <span className={`sync-dot ${notionState}`} />
             {notionState === "connected" &&
               "Notion gekoppeld · lezen en schrijven"}
@@ -1227,6 +1238,20 @@ export default function Home() {
                 </div>
               </article>
             ))}
+            {backlog.length === 0 && (
+              <div className="empty-task-list">
+                <strong>Geen open subtasks gevonden</strong>
+                <span>
+                  Ververs Notion of bekijk tijdelijk alle epics.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setFilter("Alle epics")}
+                >
+                  Toon alle epics
+                </button>
+              </div>
+            )}
           </div>
 
           <p className="drag-copy">

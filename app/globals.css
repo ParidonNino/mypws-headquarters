@@ -407,6 +407,36 @@ button {
   gap: 9px;
 }
 
+.empty-task-list {
+  display: grid;
+  gap: 7px;
+  padding: 16px 13px;
+  border: 1px dashed #c8d2df;
+  border-radius: 10px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.empty-task-list strong {
+  color: var(--ink);
+  font-size: 10px;
+}
+
+.empty-task-list span {
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.empty-task-list button {
+  justify-self: center;
+  border: 0;
+  background: transparent;
+  color: var(--blue);
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 800;
+}
+
 .backlog-card {
   display: grid;
   grid-template-columns: 4px 1fr;
