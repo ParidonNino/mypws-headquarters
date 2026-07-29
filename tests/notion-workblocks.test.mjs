@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   createNotionTaskResponse,
   getNotionTasksResponse,
+  updateNotionTaskResponse,
   updateNotionWorkblockResponse,
 } from "../lib/notion-tasks.ts";
 
@@ -268,6 +269,49 @@ test("rejects an empty roadmap ticket before calling Notion", async () => {
     );
     assert.equal(response.status, 400);
     assert.equal(fetchCalls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("updates all editable roadmap ticket fields", async () => {
+  const originalFetch = globalThis.fetch;
+  let notionBody;
+  globalThis.fetch = async (_url, init) => {
+    notionBody = JSON.parse(init.body);
+    return Response.json({});
+  };
+
+  try {
+    const response = await updateNotionTaskResponse(
+      request({
+        pageId: taskId,
+        title: "Bijgewerkte migratietaak",
+        taskType: "Feature",
+        priority: "Critical",
+        estimate: 5,
+        nextAction: "Review inplannen",
+        parentEpicId: workblockId,
+        workDate: null,
+      }),
+      "secret",
+    );
+    assert.equal(response.status, 200);
+    assert.equal(
+      notionBody.properties.Task.title[0].text.content,
+      "Bijgewerkte migratietaak",
+    );
+    assert.equal(
+      notionBody.properties["Task type"].select.name,
+      "Feature",
+    );
+    assert.equal(notionBody.properties.Priority.select.name, "Critical");
+    assert.equal(notionBody.properties["Estimate hours"].number, 5);
+    assert.equal(
+      notionBody.properties["Parent task"].relation[0].id,
+      workblockId,
+    );
+    assert.equal(notionBody.properties["Work date"].date, null);
   } finally {
     globalThis.fetch = originalFetch;
   }

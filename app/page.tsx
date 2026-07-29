@@ -11,6 +11,9 @@ type Task = {
   url?: string;
   title: string;
   epic: string;
+  parentEpicId?: string;
+  taskType?: "Feature" | "Subtask";
+  priority?: "Critical" | "High" | "Medium" | "Low";
   estimate: number;
   plannedHours?: number | null;
   loggedSeconds?: number;
@@ -60,7 +63,7 @@ type TicketDraft = {
   estimate: string;
   nextAction: string;
   parentEpicId: string;
-  schedule: "none" | "today" | "tomorrow";
+  schedule: "keep" | "none" | "today" | "tomorrow";
 };
 
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -144,16 +147,38 @@ const initialTasks: Task[] = [
   },
 ];
 
+const DAY_REFERENCE = new Date();
+const dayFormatter = new Intl.DateTimeFormat("nl-NL", {
+  weekday: "short",
+  day: "numeric",
+  month: "short",
+});
 const days: Array<{
   key: DayKey;
   label: string;
   date: string;
-  total: string;
-}> = [
-  { key: "yesterday", label: "Gisteren", date: "Zo 26 jul", total: "2u gepland" },
-  { key: "today", label: "Vandaag", date: "Ma 27 jul", total: "7u gepland" },
-  { key: "tomorrow", label: "Morgen", date: "Di 28 jul", total: "0u gepland" },
-];
+}> = (
+  [
+    ["yesterday", "Gisteren", -1],
+    ["today", "Vandaag", 0],
+    ["tomorrow", "Morgen", 1],
+  ] as const
+).map(([key, label, offset]) => {
+  const date = new Date(DAY_REFERENCE);
+  date.setDate(date.getDate() + offset);
+  return {
+    key,
+    label,
+    date: dayFormatter.format(date),
+  };
+});
+const CURRENT_DATE_HEADING = new Intl.DateTimeFormat("nl-NL", {
+  weekday: "long",
+  day: "numeric",
+  month: "long",
+})
+  .format(DAY_REFERENCE)
+  .toUpperCase();
 
 const statusLabel: Record<WorkStatus, string> = {
   ready: "Klaar om te starten",
@@ -295,6 +320,9 @@ export default function Home() {
   const [ticketSaveState, setTicketSaveState] =
     useState<SaveState>("idle");
   const [ticketSaveMessage, setTicketSaveMessage] = useState("");
+  const [editingTicketId, setEditingTicketId] = useState<string | null>(
+    null,
+  );
 
   const selected = tasks.find((task) => task.id === selectedId) ?? tasks[0];
   const activeEpic =
@@ -793,6 +821,7 @@ export default function Home() {
   function openTicketForm(
     schedule: TicketDraft["schedule"] = "none",
   ) {
+    setEditingTicketId(null);
     setTicketDraft({
       ...emptyTicketDraft(),
       parentEpicId: activeEpic?.id ?? "",
@@ -803,7 +832,26 @@ export default function Home() {
     setTicketFormOpen(true);
   }
 
-  async function createTicket(event: React.FormEvent<HTMLFormElement>) {
+  function openEditTicket(task: Task) {
+    if (typeof task.id !== "string") return;
+    setSelectedId(task.id);
+    setNote(task.nextAction ?? "");
+    setEditingTicketId(task.id);
+    setTicketDraft({
+      title: task.title,
+      taskType: task.taskType ?? "Subtask",
+      priority: task.priority ?? "Medium",
+      estimate: String(task.estimate),
+      nextAction: task.nextAction ?? "",
+      parentEpicId: task.parentEpicId ?? "",
+      schedule: "keep",
+    });
+    setTicketSaveState("idle");
+    setTicketSaveMessage("");
+    setTicketFormOpen(true);
+  }
+
+  async function saveTicket(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (notionState !== "connected") {
       setTicketSaveState("error");
@@ -815,43 +863,100 @@ export default function Home() {
     const parentEpic = epics.find(
       (epic) => epic.id === ticketDraft.parentEpicId,
     );
+    const editingTask = editingTicketId
+      ? tasks.find((task) => String(task.id) === editingTicketId)
+      : undefined;
     const workDate =
-      ticketDraft.schedule === "none"
+      ticketDraft.schedule === "keep"
+        ? editingTask?.workDate ?? null
+        : ticketDraft.schedule === "none"
         ? null
         : workDateFor(ticketDraft.schedule, "09:00");
 
     setTicketSaveState("saving");
-    setTicketSaveMessage("Ticket aanmaken in Notion…");
+    setTicketSaveMessage(
+      editingTicketId
+        ? "Ticket bijwerken in Notion…"
+        : "Ticket aanmaken in Notion…",
+    );
     try {
-      const result = await apiRequest<{ task: Task }>(
-        "/api/notion/tasks",
-        {
-          method: "POST",
+      const ticketPayload = {
+        title: ticketDraft.title,
+        taskType: ticketDraft.taskType,
+        priority: ticketDraft.priority,
+        estimate,
+        nextAction: ticketDraft.nextAction,
+        parentEpicId: parentEpic?.id ?? null,
+        epicTitle: parentEpic?.title,
+        workDate,
+      };
+
+      if (editingTicketId) {
+        await apiRequest("/api/notion/tasks", {
+          method: "PATCH",
           body: JSON.stringify({
-            title: ticketDraft.title,
-            taskType: ticketDraft.taskType,
-            priority: ticketDraft.priority,
-            estimate,
-            nextAction: ticketDraft.nextAction,
-            parentEpicId: parentEpic?.id ?? null,
-            epicTitle: parentEpic?.title,
-            workDate,
+            pageId: editingTicketId,
+            ...ticketPayload,
           }),
-        },
-      );
-      setTasks((current) => [result.task, ...current]);
-      setSelectedId(result.task.id);
-      setNote(result.task.nextAction ?? "");
+        });
+        const nextDay =
+          ticketDraft.schedule === "keep"
+            ? editingTask?.day
+            : ticketDraft.schedule === "none"
+              ? undefined
+              : ticketDraft.schedule;
+        setTasks((current) =>
+          current.map((task) =>
+            String(task.id) === editingTicketId
+              ? {
+                  ...task,
+                  title: ticketDraft.title.trim(),
+                  epic: parentEpic?.title ?? "Powerselect Roadmap",
+                  parentEpicId: parentEpic?.id,
+                  taskType: ticketDraft.taskType,
+                  priority: ticketDraft.priority,
+                  estimate,
+                  nextAction: ticketDraft.nextAction,
+                  workDate,
+                  day: nextDay,
+                  slot:
+                    ticketDraft.schedule === "keep"
+                      ? editingTask?.slot
+                      : nextDay
+                        ? "09:00"
+                        : undefined,
+                }
+              : task,
+          ),
+        );
+        setSelectedId(editingTicketId);
+        setNote(ticketDraft.nextAction);
+      } else {
+        const result = await apiRequest<{ task: Task }>(
+          "/api/notion/tasks",
+          {
+            method: "POST",
+            body: JSON.stringify(ticketPayload),
+          },
+        );
+        setTasks((current) => [result.task, ...current]);
+        setSelectedId(result.task.id);
+        setNote(result.task.nextAction ?? "");
+      }
       setFilter(
         parentEpic ? parentEpic.title : "Alle epics",
       );
       setTicketSaveState("saved");
-      setTicketSaveMessage("Ticket aangemaakt in Notion");
+      setTicketSaveMessage(
+        editingTicketId
+          ? "Ticket bijgewerkt in Notion"
+          : "Ticket aangemaakt in Notion",
+      );
       setTicketFormOpen(false);
     } catch (error) {
       setTicketSaveState("error");
       setTicketSaveMessage(
-        error instanceof Error ? error.message : "Aanmaken mislukt",
+        error instanceof Error ? error.message : "Opslaan mislukt",
       );
     }
   }
@@ -929,7 +1034,7 @@ export default function Home() {
         <>
       <section className="page-heading">
         <div>
-          <p className="eyebrow">MAANDAG 27 JULI</p>
+          <p className="eyebrow">{CURRENT_DATE_HEADING}</p>
           <h1>Goedemiddag, Nino</h1>
           <p className="subheading">
             Eén ding tegelijk. Je belangrijkste taak staat al klaar.
@@ -1007,7 +1112,9 @@ export default function Home() {
                   event.dataTransfer.setData("text/plain", String(task.id))
                 }
                 onClick={() => selectTask(task)}
+                onDoubleClick={() => openEditTicket(task)}
                 data-selected={selected.id === task.id}
+                title="Dubbelklik om dit ticket te bewerken"
               >
                 <span className={`task-accent ${task.accent}`} />
                 <div className="task-copy">
@@ -1045,6 +1152,11 @@ export default function Home() {
               const dayTasks = filteredTasks.filter(
                 (task) => task.day === day.key,
               );
+              const plannedHours = dayTasks.reduce(
+                (total, task) =>
+                  total + (task.plannedHours ?? task.estimate),
+                0,
+              );
               return (
                 <section
                   className={`day-column ${day.key === "today" ? "is-today" : ""}`}
@@ -1060,7 +1172,7 @@ export default function Home() {
                       {day.key === "today" && <i>NU</i>}
                       <strong>{day.date}</strong>
                     </div>
-                    <small>{day.total}</small>
+                    <small>{plannedHours}u gepland</small>
                   </header>
 
                   <div className="day-body">
@@ -1073,7 +1185,9 @@ export default function Home() {
                           event.dataTransfer.setData("text/plain", String(task.id))
                         }
                         onClick={() => selectTask(task)}
+                        onDoubleClick={() => openEditTicket(task)}
                         data-selected={selected.id === task.id}
+                        title="Dubbelklik om dit ticket te bewerken"
                       >
                         <span className="task-time">{task.slot}</span>
                         <strong>{task.title}</strong>
@@ -1503,8 +1617,14 @@ export default function Home() {
           >
             <div className="modal-heading">
               <div>
-                <p className="eyebrow">NIEUW NOTION-TICKET</p>
-                <h2 id="new-ticket-title">Nieuwe taak</h2>
+                <p className="eyebrow">
+                  {editingTicketId
+                    ? "NOTION-TICKET BEWERKEN"
+                    : "NIEUW NOTION-TICKET"}
+                </p>
+                <h2 id="new-ticket-title">
+                  {editingTicketId ? "Ticket aanpassen" : "Nieuwe taak"}
+                </h2>
               </div>
               <button
                 aria-label="Sluiten"
@@ -1514,7 +1634,7 @@ export default function Home() {
               </button>
             </div>
 
-            <form onSubmit={createTicket}>
+            <form onSubmit={saveTicket}>
               <label>
                 Titel
                 <input
@@ -1619,6 +1739,9 @@ export default function Home() {
                     }))
                   }
                 >
+                  {editingTicketId && (
+                    <option value="keep">Huidige planning behouden</option>
+                  )}
                   <option value="none">Later inplannen</option>
                   <option value="today">Vandaag om 09:00</option>
                   <option value="tomorrow">Morgen om 09:00</option>
@@ -1656,8 +1779,10 @@ export default function Home() {
                     disabled={ticketSaveState === "saving"}
                   >
                     {ticketSaveState === "saving"
-                      ? "Aanmaken…"
-                      : "Ticket aanmaken"}
+                      ? "Opslaan…"
+                      : editingTicketId
+                        ? "Wijzigingen opslaan"
+                        : "Ticket aanmaken"}
                   </button>
                 </div>
               </div>

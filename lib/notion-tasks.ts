@@ -205,6 +205,12 @@ export async function getNotionTasksResponse(
           url: page.url,
           title: plainText(properties.Task) || "Naamloze taak",
           epic: (parentId && titles.get(parentId)) || "Powerselect Roadmap",
+          parentEpicId: parentId ?? null,
+          taskType:
+            selectName(properties["Task type"]) === "Feature"
+              ? "Feature"
+              : "Subtask",
+          priority: selectName(properties.Priority) || "Medium",
           estimate: properties["Estimate hours"]?.number ?? 1,
           plannedHours: properties["Planned today hours"]?.number ?? null,
           loggedSeconds: loggedSeconds.get(page.id) ?? 0,
@@ -383,6 +389,11 @@ export async function createNotionTaskResponse(
         url: page.url,
         title,
         epic: epicTitle,
+        parentEpicId: validPageId(payload.parentEpicId)
+          ? payload.parentEpicId
+          : null,
+        taskType: payload.taskType,
+        priority: payload.priority,
         estimate: payload.estimate,
         plannedHours: null,
         loggedSeconds: 0,
@@ -427,7 +438,12 @@ export async function updateNotionTaskResponse(
     const payload = (await request.json()) as {
       pageId?: unknown;
       status?: unknown;
+      title?: unknown;
+      taskType?: unknown;
+      priority?: unknown;
+      estimate?: unknown;
       nextAction?: unknown;
+      parentEpicId?: unknown;
       workDate?: unknown;
     };
 
@@ -436,6 +452,55 @@ export async function updateNotionTaskResponse(
     }
 
     const properties: Record<string, unknown> = {};
+
+    if (payload.title !== undefined) {
+      if (typeof payload.title !== "string" || !payload.title.trim()) {
+        return Response.json(
+          { error: "Geef de taak een titel" },
+          { status: 400 },
+        );
+      }
+      properties.Task = {
+        title: richText(payload.title.trim().slice(0, 160)),
+      };
+    }
+
+    if (payload.taskType !== undefined) {
+      if (payload.taskType !== "Feature" && payload.taskType !== "Subtask") {
+        return Response.json({ error: "Ongeldig taaktype" }, { status: 400 });
+      }
+      properties["Task type"] = { select: { name: payload.taskType } };
+    }
+
+    if (payload.priority !== undefined) {
+      if (
+        payload.priority !== "Critical" &&
+        payload.priority !== "High" &&
+        payload.priority !== "Medium" &&
+        payload.priority !== "Low"
+      ) {
+        return Response.json(
+          { error: "Ongeldige prioriteit" },
+          { status: 400 },
+        );
+      }
+      properties.Priority = { select: { name: payload.priority } };
+    }
+
+    if (payload.estimate !== undefined) {
+      if (
+        typeof payload.estimate !== "number" ||
+        !Number.isFinite(payload.estimate) ||
+        payload.estimate < 0 ||
+        payload.estimate > 1_000
+      ) {
+        return Response.json(
+          { error: "Ongeldige inschatting" },
+          { status: 400 },
+        );
+      }
+      properties["Estimate hours"] = { number: payload.estimate };
+    }
 
     if (payload.status !== undefined) {
       if (
@@ -458,6 +523,21 @@ export async function updateNotionTaskResponse(
         );
       }
       properties["Next action"] = { rich_text: richText(payload.nextAction) };
+    }
+
+    if (payload.parentEpicId !== undefined) {
+      if (
+        payload.parentEpicId !== null &&
+        payload.parentEpicId !== "" &&
+        !validPageId(payload.parentEpicId)
+      ) {
+        return Response.json({ error: "Ongeldige epic" }, { status: 400 });
+      }
+      properties["Parent task"] = {
+        relation: validPageId(payload.parentEpicId)
+          ? [{ id: payload.parentEpicId }]
+          : [],
+      };
     }
 
     if (payload.workDate !== undefined) {
