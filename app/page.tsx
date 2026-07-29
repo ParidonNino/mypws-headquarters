@@ -7,14 +7,26 @@ type DayKey = "yesterday" | "today" | "tomorrow";
 
 type Task = {
   id: number | string;
+  url?: string;
   title: string;
   epic: string;
   estimate: number;
+  plannedHours?: number | null;
   status: WorkStatus;
   day?: DayKey;
+  workDate?: string | null;
   slot?: string;
+  nextAction?: string;
   accent: "blue" | "violet" | "amber" | "mint";
 };
+
+type ActiveSession = {
+  taskId: string;
+  workblockId?: string;
+  startedAt: string;
+};
+
+type SaveState = "idle" | "saving" | "saved" | "error";
 
 const initialTasks: Task[] = [
   {
@@ -100,6 +112,37 @@ function formatDuration(totalSeconds: number) {
     .join(":");
 }
 
+function workDateFor(day: DayKey, slot: string) {
+  const date = new Date();
+  const dayOffset = day === "yesterday" ? -1 : day === "tomorrow" ? 1 : 0;
+  date.setDate(date.getDate() + dayOffset);
+  const [hours, minutes] = slot.split(":").map(Number);
+  date.setHours(hours, minutes, 0, 0);
+  return date.toISOString();
+}
+
+function elapsedSince(startedAt: string) {
+  return Math.max(
+    0,
+    Math.floor((Date.now() - Date.parse(startedAt)) / 1000),
+  );
+}
+
+async function apiRequest<T>(url: string, init: RequestInit) {
+  const response = await fetch(url, {
+    ...init,
+    headers: { "Content-Type": "application/json", ...init.headers },
+  });
+  const payload = (await response.json()) as T & {
+    error?: string;
+    detail?: string;
+  };
+  if (!response.ok) {
+    throw new Error(payload.error ?? payload.detail ?? "Notion-fout");
+  }
+  return payload;
+}
+
 function Icon({
   children,
   size = "normal",
@@ -121,6 +164,9 @@ export default function Home() {
     "Database-tabellen nalopen en bepalen welke velden vóór de migratie opgeschoond moeten worden.",
   );
   const [elapsedSeconds, setElapsedSeconds] = useState(6138);
+  const [activeSession, setActiveSession] = useState<ActiveSession | null>(null);
+  const [saveState, setSaveState] = useState<SaveState>("idle");
+  const [saveMessage, setSaveMessage] = useState("");
 
   const selected = tasks.find((task) => task.id === selectedId) ?? tasks[0];
   const backlog = useMemo(
@@ -130,13 +176,31 @@ export default function Home() {
 
   useEffect(() => {
     let cancelled = false;
+    let savedSession: ActiveSession | null = null;
 
     const savedTasks = window.localStorage.getItem("powerselect-planner-tasks");
     if (savedTasks) {
       try {
-        setTasks(JSON.parse(savedTasks));
+        const localTasks = JSON.parse(savedTasks) as Task[];
+        queueMicrotask(() => {
+          if (!cancelled) setTasks(localTasks);
+        });
       } catch {
         window.localStorage.removeItem("powerselect-planner-tasks");
+      }
+    }
+
+    const storedSession = window.localStorage.getItem(
+      "powerselect-active-workblock",
+    );
+    if (storedSession) {
+      try {
+        savedSession = JSON.parse(storedSession) as ActiveSession;
+        queueMicrotask(() => {
+          if (!cancelled) setActiveSession(savedSession);
+        });
+      } catch {
+        window.localStorage.removeItem("powerselect-active-workblock");
       }
     }
 
@@ -150,9 +214,23 @@ export default function Home() {
         }
 
         if (!cancelled) {
-          setTasks(payload.tasks);
-          setSelectedId(payload.tasks[0].id);
-          setNote(payload.tasks[0].nextAction ?? "");
+          const connectedTasks = (payload.tasks as Task[]).map((task) =>
+            savedSession && String(task.id) === savedSession.taskId
+              ? { ...task, status: "running" as const }
+              : task,
+          );
+          const firstTask =
+            connectedTasks.find(
+              (task) => savedSession && String(task.id) === savedSession.taskId,
+            ) ?? connectedTasks[0];
+          setTasks(connectedTasks);
+          setSelectedId(firstTask.id);
+          setNote(firstTask.nextAction ?? "");
+          setElapsedSeconds(
+            savedSession && String(firstTask.id) === savedSession.taskId
+              ? elapsedSince(savedSession.startedAt)
+              : 0,
+          );
           setNotionState("connected");
         }
       })
@@ -166,13 +244,20 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (selected.status !== "running") return;
-    const interval = window.setInterval(
-      () => setElapsedSeconds((seconds) => seconds + 1),
-      1000,
-    );
+    if (
+      !activeSession ||
+      String(selected.id) !== activeSession.taskId ||
+      selected.status !== "running"
+    ) {
+      return;
+    }
+
+    const updateElapsed = () =>
+      setElapsedSeconds(elapsedSince(activeSession.startedAt));
+    updateElapsed();
+    const interval = window.setInterval(updateElapsed, 1000);
     return () => window.clearInterval(interval);
-  }, [selected.status, selected.id]);
+  }, [activeSession, selected.status, selected.id]);
 
   useEffect(() => {
     if (notionState === "demo" || notionState === "error") {
@@ -183,30 +268,264 @@ export default function Home() {
     }
   }, [tasks, notionState]);
 
-  function moveTask(id: number | string, day: DayKey) {
+  function rememberSession(session: ActiveSession | null) {
+    setActiveSession(session);
+    if (session) {
+      window.localStorage.setItem(
+        "powerselect-active-workblock",
+        JSON.stringify(session),
+      );
+    } else {
+      window.localStorage.removeItem("powerselect-active-workblock");
+    }
+  }
+
+  function setFeedback(state: SaveState, message: string) {
+    setSaveState(state);
+    setSaveMessage(message);
+  }
+
+  function selectTask(task: Task) {
+    setSelectedId(task.id);
+    setNote(task.nextAction ?? "");
+    setElapsedSeconds(
+      activeSession && String(task.id) === activeSession.taskId
+        ? elapsedSince(activeSession.startedAt)
+        : 0,
+    );
+  }
+
+  async function moveTask(id: number | string, day: DayKey) {
     const target = tasks.find((task) => String(task.id) === String(id));
+    if (!target) return;
+    const previous = {
+      day: target.day,
+      slot: target.slot,
+      workDate: target.workDate,
+    };
+    const slot = day === "today" ? "16:00" : "10:00";
+    const workDate = workDateFor(day, slot);
+
     setTasks((current) =>
       current.map((task) =>
         String(task.id) === String(id)
-          ? { ...task, day, slot: day === "today" ? "16:00" : "10:00" }
+          ? { ...task, day, slot, workDate }
           : task,
       ),
     );
-    if (target) setSelectedId(target.id);
+    selectTask(target);
+
+    if (notionState !== "connected" || typeof target.id !== "string") return;
+
+    setFeedback("saving", "Planning opslaan…");
+    try {
+      await apiRequest("/api/notion/tasks", {
+        method: "PATCH",
+        body: JSON.stringify({ pageId: target.id, workDate }),
+      });
+      setFeedback("saved", "Planning opgeslagen in Notion");
+    } catch (error) {
+      setTasks((current) =>
+        current.map((task) =>
+          String(task.id) === String(id) ? { ...task, ...previous } : task,
+        ),
+      );
+      setFeedback(
+        "error",
+        error instanceof Error ? error.message : "Opslaan mislukt",
+      );
+    }
   }
 
-  function setStatus(status: WorkStatus) {
+  function setLocalStatus(taskId: number | string, status: WorkStatus) {
     setTasks((current) =>
       current.map((task) =>
-        task.id === selected.id
+        String(task.id) === String(taskId)
           ? { ...task, status }
-          : status === "running" && task.status === "running"
-            ? { ...task, status: "paused" }
-            : task,
+          : task,
       ),
     );
-    if (status === "running" && selected.status === "done") {
+  }
+
+  async function pauseSession(session: ActiveSession) {
+    const result = await apiRequest<{ workblockSaved?: boolean }>(
+      "/api/notion/workblocks",
+      {
+      method: "POST",
+      body: JSON.stringify({
+        action: "pause",
+        taskId: session.taskId,
+        workblockId: session.workblockId,
+        startedAt: session.startedAt,
+      }),
+      },
+    );
+    setLocalStatus(session.taskId, "paused");
+    rememberSession(null);
+    return result.workblockSaved === true;
+  }
+
+  async function startTask() {
+    if (saveState === "saving" || selected.status === "running") return;
+
+    if (notionState !== "connected" || typeof selected.id !== "string") {
+      setLocalStatus(selected.id, "running");
+      return;
+    }
+
+    setFeedback("saving", "Werkblok starten…");
+    try {
+      if (activeSession && activeSession.taskId !== String(selected.id)) {
+        await pauseSession(activeSession);
+      }
+
+      const result = await apiRequest<{
+        workblockId?: string;
+        workblockSaved?: boolean;
+        startedAt?: string;
+      }>("/api/notion/workblocks", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "start",
+          taskId: selected.id,
+          taskTitle: selected.title,
+          plannedHours: selected.plannedHours ?? selected.estimate,
+          nextAction: note,
+        }),
+      });
+      if (!result.startedAt) {
+        throw new Error("Notion gaf geen starttijd terug");
+      }
+
+      setTasks((current) =>
+        current.map((task) =>
+          String(task.id) === String(selected.id)
+            ? { ...task, status: "running" }
+            : task.status === "running"
+              ? { ...task, status: "paused" }
+              : task,
+        ),
+      );
+      rememberSession({
+        taskId: String(selected.id),
+        workblockId: result.workblockId,
+        startedAt: result.startedAt,
+      });
       setElapsedSeconds(0);
+      setFeedback(
+        result.workblockSaved ? "saved" : "error",
+        result.workblockSaved
+          ? "Gestart en opgeslagen in Notion"
+          : "Ticket gestart · deel Werkblokken voor tijdregistratie",
+      );
+    } catch (error) {
+      setFeedback(
+        "error",
+        error instanceof Error ? error.message : "Starten mislukt",
+      );
+    }
+  }
+
+  async function pauseTask() {
+    if (saveState === "saving" || selected.status !== "running") return;
+
+    if (notionState !== "connected" || typeof selected.id !== "string") {
+      setLocalStatus(selected.id, "paused");
+      return;
+    }
+
+    setFeedback("saving", "Werkblok pauzeren…");
+    try {
+      if (activeSession && activeSession.taskId === String(selected.id)) {
+        const workblockSaved = await pauseSession(activeSession);
+        setFeedback(
+          workblockSaved ? "saved" : "error",
+          workblockSaved
+            ? "Pauze en gewerkte tijd opgeslagen"
+            : "Pauze actief · tijd nog niet opgeslagen in Werkblokken",
+        );
+      } else {
+        setLocalStatus(selected.id, "paused");
+        setFeedback("saved", "Pauze actief");
+      }
+    } catch (error) {
+      setFeedback(
+        "error",
+        error instanceof Error ? error.message : "Pauzeren mislukt",
+      );
+    }
+  }
+
+  async function finishTask() {
+    if (saveState === "saving" || selected.status === "done") return;
+
+    if (notionState !== "connected" || typeof selected.id !== "string") {
+      setLocalStatus(selected.id, "done");
+      return;
+    }
+
+    setFeedback("saving", "Taak afronden…");
+    try {
+      const session =
+        activeSession?.taskId === String(selected.id) ? activeSession : null;
+      const result = await apiRequest<{ workblockSaved?: boolean }>(
+        "/api/notion/workblocks",
+        {
+        method: "POST",
+        body: JSON.stringify({
+          action: "done",
+          taskId: selected.id,
+          workblockId: session?.workblockId,
+          startedAt: session?.startedAt,
+        }),
+        },
+      );
+      if (session) rememberSession(null);
+      setLocalStatus(selected.id, "done");
+      setFeedback(
+        "saved",
+        session && !result.workblockSaved
+          ? "Taak afgerond · sessietijd niet opgeslagen"
+          : "Taak afgerond in Notion",
+      );
+    } catch (error) {
+      setFeedback(
+        "error",
+        error instanceof Error ? error.message : "Afronden mislukt",
+      );
+    }
+  }
+
+  async function saveNote(value = note) {
+    if (notionState !== "connected" || typeof selected.id !== "string") {
+      setTasks((current) =>
+        current.map((task) =>
+          task.id === selected.id ? { ...task, nextAction: value } : task,
+        ),
+      );
+      return;
+    }
+
+    setFeedback("saving", "Notitie opslaan…");
+    try {
+      await apiRequest("/api/notion/tasks", {
+        method: "PATCH",
+        body: JSON.stringify({
+          pageId: selected.id,
+          nextAction: value,
+        }),
+      });
+      setTasks((current) =>
+        current.map((task) =>
+          task.id === selected.id ? { ...task, nextAction: value } : task,
+        ),
+      );
+      setFeedback("saved", "Volgende actie opgeslagen in Notion");
+    } catch (error) {
+      setFeedback(
+        "error",
+        error instanceof Error ? error.message : "Opslaan mislukt",
+      );
     }
   }
 
@@ -233,7 +552,8 @@ export default function Home() {
         <div className="top-actions">
           <button className="sync-button">
             <span className={`sync-dot ${notionState}`} />
-            {notionState === "connected" && "Notion gekoppeld · lezen"}
+            {notionState === "connected" &&
+              "Notion gekoppeld · lezen en schrijven"}
             {notionState === "loading" && "Notion controleren…"}
             {notionState === "demo" && "Voorbeelddata"}
             {notionState === "error" && "Notion niet bereikbaar"}
@@ -310,7 +630,7 @@ export default function Home() {
                 onDragStart={(event) =>
                   event.dataTransfer.setData("text/plain", String(task.id))
                 }
-                onClick={() => setSelectedId(task.id)}
+                onClick={() => selectTask(task)}
                 data-selected={selected.id === task.id}
               >
                 <span className={`task-accent ${task.accent}`} />
@@ -374,7 +694,7 @@ export default function Home() {
                         onDragStart={(event) =>
                           event.dataTransfer.setData("text/plain", String(task.id))
                         }
-                        onClick={() => setSelectedId(task.id)}
+                        onClick={() => selectTask(task)}
                         data-selected={selected.id === task.id}
                       >
                         <span className="task-time">{task.slot}</span>
@@ -435,15 +755,27 @@ export default function Home() {
           <div className="control-buttons">
             <button
               className="start"
-              onClick={() => setStatus("running")}
-              disabled={selected.status === "running"}
+              onClick={startTask}
+              disabled={
+                selected.status === "running" || saveState === "saving"
+              }
             >
               ▶ Start
             </button>
-            <button className="pause" onClick={() => setStatus("paused")}>
+            <button
+              className="pause"
+              onClick={pauseTask}
+              disabled={
+                selected.status !== "running" || saveState === "saving"
+              }
+            >
               Ⅱ Pauze
             </button>
-            <button className="finish" onClick={() => setStatus("done")}>
+            <button
+              className="finish"
+              onClick={finishTask}
+              disabled={selected.status === "done" || saveState === "saving"}
+            >
               ✓ Klaar
             </button>
           </div>
@@ -456,8 +788,35 @@ export default function Home() {
               onChange={(event) => setNote(event.target.value)}
             />
             <div className="note-meta">
-              <span>Wordt opgeslagen in Notion</span>
-              <button onClick={() => setNote("")}>Wissen</button>
+              <span
+                className={`save-feedback ${saveState}`}
+                role={saveState === "error" ? "alert" : "status"}
+              >
+                {saveMessage || "Wijzigingen worden opgeslagen in Notion"}
+              </span>
+              <div>
+                {selected.url && (
+                  <a href={selected.url} target="_blank" rel="noreferrer">
+                    Open in Notion
+                  </a>
+                )}
+                <button
+                  className="save-note"
+                  onClick={() => saveNote()}
+                  disabled={saveState === "saving"}
+                >
+                  Opslaan
+                </button>
+                <button
+                  onClick={() => {
+                    setNote("");
+                    void saveNote("");
+                  }}
+                  disabled={saveState === "saving"}
+                >
+                  Wissen
+                </button>
+              </div>
             </div>
           </div>
 

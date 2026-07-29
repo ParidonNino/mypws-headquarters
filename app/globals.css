@@ -845,6 +845,11 @@ button {
   color: #137656;
 }
 
+.control-buttons button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .note-area {
   display: grid;
   gap: 7px;
@@ -869,9 +874,22 @@ button {
 }
 
 .note-meta {
+  align-items: flex-start;
+  gap: 8px;
   justify-content: space-between;
   color: #9aa4b2;
   font-size: 8px;
+}
+
+.note-meta > div {
+  display: flex;
+  flex-shrink: 0;
+  gap: 8px;
+}
+
+.note-meta a {
+  color: #657286;
+  text-decoration: none;
 }
 
 .note-meta button {
@@ -880,6 +898,27 @@ button {
   color: var(--blue);
   cursor: pointer;
   font-size: 8px;
+}
+
+.note-meta button.save-note {
+  font-weight: 750;
+}
+
+.note-meta button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.save-feedback.saved {
+  color: #137656;
+}
+
+.save-feedback.error {
+  color: #b54d4d;
+}
+
+.save-feedback.saving {
+  color: #4267b7;
 }
 
 .today-summary {

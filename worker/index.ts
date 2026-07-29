@@ -1,13 +1,18 @@
 /** Cloudflare Worker entry point for the vinext-starter template. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
-import { getNotionTasksResponse } from "../lib/notion-tasks";
+import {
+  getNotionTasksResponse,
+  updateNotionTaskResponse,
+  updateNotionWorkblockResponse,
+} from "../lib/notion-tasks";
 
 interface Env {
   ASSETS: Fetcher;
   DB: D1Database;
   NOTION_TOKEN?: string;
   NOTION_ROADMAP_DATA_SOURCE_ID?: string;
+  NOTION_WORKBLOCKS_DATA_SOURCE_ID?: string;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
@@ -36,6 +41,21 @@ const worker = {
       return getNotionTasksResponse(
         env.NOTION_TOKEN,
         env.NOTION_ROADMAP_DATA_SOURCE_ID,
+      );
+    }
+
+    if (url.pathname === "/api/notion/tasks" && request.method === "PATCH") {
+      return updateNotionTaskResponse(request, env.NOTION_TOKEN);
+    }
+
+    if (
+      url.pathname === "/api/notion/workblocks" &&
+      request.method === "POST"
+    ) {
+      return updateNotionWorkblockResponse(
+        request,
+        env.NOTION_TOKEN,
+        env.NOTION_WORKBLOCKS_DATA_SOURCE_ID,
       );
     }
 
