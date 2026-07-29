@@ -308,7 +308,7 @@ export default function Home() {
   const [note, setNote] = useState(
     "Database-tabellen nalopen en bepalen welke velden vóór de migratie opgeschoond moeten worden.",
   );
-  const [elapsedSeconds, setElapsedSeconds] = useState(6138);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [activeSession, setActiveSession] = useState<ActiveSession | null>(null);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [saveMessage, setSaveMessage] = useState("");
@@ -542,7 +542,7 @@ export default function Home() {
       slot: target.slot,
       workDate: target.workDate,
     };
-    const slot = day === "today" ? "16:00" : "10:00";
+    const slot = target.slot ?? "09:00";
     const workDate = workDateFor(day, slot);
 
     setTasks((current) =>
