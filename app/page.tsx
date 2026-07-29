@@ -128,6 +128,27 @@ function elapsedSince(startedAt: string) {
   );
 }
 
+function parseStoredSession(value: string): ActiveSession | null {
+  const parsed = JSON.parse(value) as Partial<ActiveSession> & {
+    workblockId?: unknown;
+  };
+  if (
+    typeof parsed.taskId !== "string" ||
+    typeof parsed.startedAt !== "string" ||
+    Number.isNaN(Date.parse(parsed.startedAt))
+  ) {
+    return null;
+  }
+
+  return {
+    taskId: parsed.taskId,
+    startedAt: parsed.startedAt,
+    ...(typeof parsed.workblockId === "string" && parsed.workblockId
+      ? { workblockId: parsed.workblockId }
+      : {}),
+  };
+}
+
 async function apiRequest<T>(url: string, init: RequestInit) {
   const response = await fetch(url, {
     ...init,
@@ -195,10 +216,14 @@ export default function Home() {
     );
     if (storedSession) {
       try {
-        savedSession = JSON.parse(storedSession) as ActiveSession;
-        queueMicrotask(() => {
-          if (!cancelled) setActiveSession(savedSession);
-        });
+        savedSession = parseStoredSession(storedSession);
+        if (savedSession) {
+          queueMicrotask(() => {
+            if (!cancelled) setActiveSession(savedSession);
+          });
+        } else {
+          window.localStorage.removeItem("powerselect-active-workblock");
+        }
       } catch {
         window.localStorage.removeItem("powerselect-active-workblock");
       }
@@ -408,8 +433,10 @@ export default function Home() {
       );
       rememberSession({
         taskId: String(selected.id),
-        workblockId: result.workblockId,
         startedAt: result.startedAt,
+        ...(typeof result.workblockId === "string" && result.workblockId
+          ? { workblockId: result.workblockId }
+          : {}),
       });
       setElapsedSeconds(0);
       setFeedback(

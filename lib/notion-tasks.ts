@@ -52,7 +52,9 @@ function dayKey(date?: string) {
 
 function workStatus(status: string) {
   if (status === "Done") return "done";
-  if (status === "In Progress") return "running";
+  // "In Progress" describes the Notion ticket, not a live timer. The client
+  // only promotes a task to "running" when it has a locally active session.
+  if (status === "In Progress") return "paused";
   if (status === "Needs Input") return "paused";
   return "ready";
 }
@@ -421,7 +423,12 @@ export async function updateNotionWorkblockResponse(
       });
     }
 
-    if (payload.workblockId !== undefined) {
+    const hasWorkblockId =
+      payload.workblockId !== undefined &&
+      payload.workblockId !== null &&
+      payload.workblockId !== "";
+
+    if (hasWorkblockId) {
       if (!validPageId(payload.workblockId)) {
         return Response.json(
           { error: "Ongeldig Notion-werkblok" },
@@ -463,7 +470,7 @@ export async function updateNotionWorkblockResponse(
       configured: true,
       saved: true,
       action: payload.action,
-      workblockSaved: payload.workblockId !== undefined,
+      workblockSaved: hasWorkblockId,
       endedAt: nowIso,
     });
   } catch (error) {
