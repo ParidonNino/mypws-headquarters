@@ -19,29 +19,95 @@ function request(body) {
 
 test("treats a Notion In Progress ticket as paused without a live session", async () => {
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () =>
-    Response.json({
-      results: [
-        {
-          id: taskId,
-          url: `https://app.notion.com/${taskId.replaceAll("-", "")}`,
-          properties: {
-            Task: {
-              type: "title",
-              title: [{ plain_text: "Database-schema refactor" }],
+  globalThis.fetch = async (url) =>
+    String(url).includes("/roadmap/")
+      ? Response.json({
+          results: [
+            {
+              id: taskId,
+              url: `https://app.notion.com/${taskId.replaceAll("-", "")}`,
+              properties: {
+                Task: {
+                  type: "title",
+                  title: [{ plain_text: "Database-schema refactor" }],
+                },
+                "Task type": {
+                  type: "select",
+                  select: { name: "Subtask" },
+                },
+                Status: {
+                  type: "select",
+                  select: { name: "In Progress" },
+                },
+              },
             },
-            "Task type": { type: "select", select: { name: "Subtask" } },
-            Status: { type: "select", select: { name: "In Progress" } },
-          },
-        },
-      ],
-    });
+          ],
+        })
+      : Response.json({ results: [] });
 
   try {
-    const response = await getNotionTasksResponse("secret", "roadmap");
+    const response = await getNotionTasksResponse(
+      "secret",
+      "roadmap",
+      "workblocks",
+    );
     const payload = await response.json();
     assert.equal(response.status, 200);
     assert.equal(payload.tasks[0].status, "paused");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("adds completed Workblocks time to the roadmap task", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) =>
+    String(url).includes("/roadmap/")
+      ? Response.json({
+          results: [
+            {
+              id: taskId,
+              properties: {
+                Task: {
+                  type: "title",
+                  title: [{ plain_text: "Database-schema refactor" }],
+                },
+                "Task type": {
+                  type: "select",
+                  select: { name: "Subtask" },
+                },
+                Status: {
+                  type: "select",
+                  select: { name: "In Progress" },
+                },
+              },
+            },
+          ],
+        })
+      : Response.json({
+          results: [
+            {
+              id: workblockId,
+              properties: {
+                "Roadmap task": {
+                  type: "relation",
+                  relation: [{ id: taskId }],
+                },
+                "Actual hours": { type: "number", number: 0.5 },
+              },
+            },
+          ],
+        });
+
+  try {
+    const response = await getNotionTasksResponse(
+      "secret",
+      "roadmap",
+      "workblocks",
+    );
+    const payload = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(payload.tasks[0].loggedSeconds, 1_800);
   } finally {
     globalThis.fetch = originalFetch;
   }

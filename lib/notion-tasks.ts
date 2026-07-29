@@ -101,6 +101,7 @@ async function notionError(response: Response) {
 export async function getNotionTasksResponse(
   token?: string,
   configuredDataSourceId?: string,
+  configuredWorkblocksDataSourceId?: string,
 ) {
   if (!token || token === "PLAK_HIER_DE_NOTION_SLEUTEL") {
     return Response.json({
@@ -148,6 +149,41 @@ export async function getNotionTasksResponse(
 
     const payload = (await response.json()) as { results?: NotionPage[] };
     const pages = payload.results ?? [];
+    const loggedSeconds = new Map<string, number>();
+    const workblocksDataSourceId =
+      configuredWorkblocksDataSourceId || DEFAULT_WORKBLOCKS_DATA_SOURCE_ID;
+
+    try {
+      const workblocksResponse = await fetch(
+        `https://api.notion.com/v1/data_sources/${workblocksDataSourceId}/query`,
+        {
+          method: "POST",
+          headers: notionHeaders(token),
+          body: JSON.stringify({ page_size: 100 }),
+        },
+      );
+      if (workblocksResponse.ok) {
+        const workblocksPayload = (await workblocksResponse.json()) as {
+          results?: NotionPage[];
+        };
+        for (const workblock of workblocksPayload.results ?? []) {
+          const taskId =
+            workblock.properties?.["Roadmap task"]?.relation?.[0]?.id;
+          const actualHours =
+            workblock.properties?.["Actual hours"]?.number ?? 0;
+          if (taskId && actualHours > 0) {
+            loggedSeconds.set(
+              taskId,
+              (loggedSeconds.get(taskId) ?? 0) +
+                Math.round(actualHours * 3_600),
+            );
+          }
+        }
+      }
+    } catch {
+      // Roadmap planning stays available when Workblocks is not shared yet.
+    }
+
     const titles = new Map(
       pages.map((page) => [page.id, plainText(page.properties?.Task)]),
     );
@@ -171,6 +207,7 @@ export async function getNotionTasksResponse(
           epic: (parentId && titles.get(parentId)) || "Powerselect Roadmap",
           estimate: properties["Estimate hours"]?.number ?? 1,
           plannedHours: properties["Planned today hours"]?.number ?? null,
+          loggedSeconds: loggedSeconds.get(page.id) ?? 0,
           status: workStatus(selectName(properties.Status)),
           notionStatus: selectName(properties.Status),
           day: dayKey(workDate),

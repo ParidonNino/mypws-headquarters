@@ -12,6 +12,7 @@ type Task = {
   epic: string;
   estimate: number;
   plannedHours?: number | null;
+  loggedSeconds?: number;
   status: WorkStatus;
   day?: DayKey;
   workDate?: string | null;
@@ -252,9 +253,10 @@ export default function Home() {
           setSelectedId(firstTask.id);
           setNote(firstTask.nextAction ?? "");
           setElapsedSeconds(
-            savedSession && String(firstTask.id) === savedSession.taskId
-              ? elapsedSince(savedSession.startedAt)
-              : 0,
+            (firstTask.loggedSeconds ?? 0) +
+              (savedSession && String(firstTask.id) === savedSession.taskId
+                ? elapsedSince(savedSession.startedAt)
+                : 0),
           );
           setNotionState("connected");
         }
@@ -278,11 +280,19 @@ export default function Home() {
     }
 
     const updateElapsed = () =>
-      setElapsedSeconds(elapsedSince(activeSession.startedAt));
+      setElapsedSeconds(
+        (selected.loggedSeconds ?? 0) +
+          elapsedSince(activeSession.startedAt),
+      );
     updateElapsed();
     const interval = window.setInterval(updateElapsed, 1000);
     return () => window.clearInterval(interval);
-  }, [activeSession, selected.status, selected.id]);
+  }, [
+    activeSession,
+    selected.status,
+    selected.id,
+    selected.loggedSeconds,
+  ]);
 
   useEffect(() => {
     if (notionState === "demo" || notionState === "error") {
@@ -314,9 +324,10 @@ export default function Home() {
     setSelectedId(task.id);
     setNote(task.nextAction ?? "");
     setElapsedSeconds(
-      activeSession && String(task.id) === activeSession.taskId
-        ? elapsedSince(activeSession.startedAt)
-        : 0,
+      (task.loggedSeconds ?? 0) +
+        (activeSession && String(task.id) === activeSession.taskId
+          ? elapsedSince(activeSession.startedAt)
+          : 0),
     );
   }
 
@@ -373,6 +384,7 @@ export default function Home() {
   }
 
   async function pauseSession(session: ActiveSession) {
+    const sessionSeconds = elapsedSince(session.startedAt);
     const result = await apiRequest<{ workblockSaved?: boolean }>(
       "/api/notion/workblocks",
       {
@@ -385,7 +397,22 @@ export default function Home() {
       }),
       },
     );
-    setLocalStatus(session.taskId, "paused");
+    setTasks((current) =>
+      current.map((task) =>
+        String(task.id) === session.taskId
+          ? {
+              ...task,
+              status: "paused",
+              loggedSeconds: (task.loggedSeconds ?? 0) + sessionSeconds,
+            }
+          : task,
+      ),
+    );
+    if (String(selected.id) === session.taskId) {
+      setElapsedSeconds(
+        (selected.loggedSeconds ?? 0) + sessionSeconds,
+      );
+    }
     rememberSession(null);
     return result.workblockSaved === true;
   }
@@ -438,7 +465,7 @@ export default function Home() {
           ? { workblockId: result.workblockId }
           : {}),
       });
-      setElapsedSeconds(0);
+      setElapsedSeconds(selected.loggedSeconds ?? 0);
       setFeedback(
         result.workblockSaved ? "saved" : "error",
         result.workblockSaved
@@ -507,8 +534,27 @@ export default function Home() {
         }),
         },
       );
-      if (session) rememberSession(null);
-      setLocalStatus(selected.id, "done");
+      if (session) {
+        const sessionSeconds = elapsedSince(session.startedAt);
+        rememberSession(null);
+        setTasks((current) =>
+          current.map((task) =>
+            String(task.id) === String(selected.id)
+              ? {
+                  ...task,
+                  status: "done",
+                  loggedSeconds:
+                    (task.loggedSeconds ?? 0) + sessionSeconds,
+                }
+              : task,
+          ),
+        );
+        setElapsedSeconds(
+          (selected.loggedSeconds ?? 0) + sessionSeconds,
+        );
+      } else {
+        setLocalStatus(selected.id, "done");
+      }
       setFeedback(
         "saved",
         session && !result.workblockSaved
