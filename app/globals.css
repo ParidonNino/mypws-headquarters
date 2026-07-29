@@ -613,6 +613,11 @@ button {
   border-radius: 7px;
 }
 
+.date-controls button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
 .today-button {
   font-weight: 700;
 }
@@ -762,6 +767,25 @@ button {
   margin-top: 12px;
   color: var(--muted);
   font-size: 8px;
+}
+
+.calendar-task-open {
+  width: 100%;
+  margin-top: 8px;
+  padding: 5px 7px;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--card-color);
+  cursor: pointer;
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.calendar-task-open:hover,
+.calendar-task-open:focus-visible {
+  background: #fff;
+  outline: 2px solid color-mix(in srgb, var(--card-color) 35%, white);
 }
 
 .status-pill {

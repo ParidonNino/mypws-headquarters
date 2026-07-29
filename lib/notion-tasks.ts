@@ -29,6 +29,12 @@ type NotionPage = {
   properties?: Record<string, NotionProperty>;
 };
 
+type NotionListResponse<T> = {
+  results?: T[];
+  has_more?: boolean;
+  next_cursor?: string | null;
+};
+
 function plainText(property?: NotionProperty) {
   const fragments =
     property?.type === "title" ? property.title : property?.rich_text;
@@ -39,16 +45,26 @@ function selectName(property?: NotionProperty) {
   return property?.select?.name ?? "";
 }
 
+function amsterdamDateKey(value = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Amsterdam",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(value);
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((item) => item.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
 function dayKey(date?: string) {
   if (!date) return undefined;
 
-  const today = new Date();
-  const current = new Date(
-    today.getFullYear(),
-    today.getMonth(),
-    today.getDate(),
-  );
-  const target = new Date(`${date.slice(0, 10)}T00:00:00`);
+  const current = new Date(`${amsterdamDateKey()}T12:00:00Z`);
+  const targetDateKey = date.includes("T")
+    ? amsterdamDateKey(new Date(date))
+    : date.slice(0, 10);
+  const target = new Date(`${targetDateKey}T12:00:00Z`);
   const difference = Math.round(
     (target.getTime() - current.getTime()) / 86_400_000,
   );
@@ -95,6 +111,63 @@ function richText(content: string) {
   ];
 }
 
+async function queryDataSource(
+  token: string,
+  dataSourceId: string,
+  body: Record<string, unknown>,
+) {
+  const results: NotionPage[] = [];
+  let startCursor: string | undefined;
+
+  do {
+    const response = await fetch(
+      `https://api.notion.com/v1/data_sources/${dataSourceId}/query`,
+      {
+        method: "POST",
+        headers: notionHeaders(token),
+        body: JSON.stringify({
+          ...body,
+          page_size: 100,
+          ...(startCursor ? { start_cursor: startCursor } : {}),
+        }),
+      },
+    );
+    if (!response.ok) return { response, results: [] };
+
+    const payload = (await response.json()) as NotionListResponse<NotionPage>;
+    results.push(...(payload.results ?? []));
+    startCursor =
+      payload.has_more && payload.next_cursor
+        ? payload.next_cursor
+        : undefined;
+  } while (startCursor);
+
+  return { response: null, results };
+}
+
+async function listUsers(token: string) {
+  const results: NotionUser[] = [];
+  let startCursor: string | undefined;
+
+  do {
+    const url = new URL("https://api.notion.com/v1/users");
+    url.searchParams.set("page_size", "100");
+    if (startCursor) url.searchParams.set("start_cursor", startCursor);
+
+    const response = await fetch(url, { headers: notionHeaders(token) });
+    if (!response.ok) return results;
+
+    const payload = (await response.json()) as NotionListResponse<NotionUser>;
+    results.push(...(payload.results ?? []));
+    startCursor =
+      payload.has_more && payload.next_cursor
+        ? payload.next_cursor
+        : undefined;
+  } while (startCursor);
+
+  return results;
+}
+
 async function notionError(response: Response) {
   const detail = (await response.text()).slice(0, 300);
   return Response.json(
@@ -124,40 +197,31 @@ export async function getNotionTasksResponse(
     configuredDataSourceId || DEFAULT_ROADMAP_DATA_SOURCE_ID;
 
   try {
-    const response = await fetch(
-      `https://api.notion.com/v1/data_sources/${dataSourceId}/query`,
-      {
-        method: "POST",
-        headers: notionHeaders(token),
-        body: JSON.stringify({
-          page_size: 100,
-          filter: {
-            property: "Task type",
-            select: { does_not_equal: "Template" },
-          },
-          sorts: [
-            { property: "Daily order", direction: "ascending" },
-            { property: "Priority", direction: "ascending" },
-          ],
-        }),
+    const roadmapResult = await queryDataSource(token, dataSourceId, {
+      filter: {
+        property: "Task type",
+        select: { does_not_equal: "Template" },
       },
-    );
+      sorts: [
+        { property: "Daily order", direction: "ascending" },
+        { property: "Priority", direction: "ascending" },
+      ],
+    });
 
-    if (!response.ok) {
-      const body = await response.text();
+    if (roadmapResult.response) {
+      const body = await roadmapResult.response.text();
       return Response.json(
         {
           configured: true,
-          error: `Notion gaf status ${response.status}`,
+          error: `Notion gaf status ${roadmapResult.response.status}`,
           detail: body.slice(0, 300),
           tasks: [],
         },
-        { status: response.status },
+        { status: roadmapResult.response.status },
       );
     }
 
-    const payload = (await response.json()) as { results?: NotionPage[] };
-    const pages = payload.results ?? [];
+    const pages = roadmapResult.results;
     const loggedSeconds = new Map<string, number>();
     let people: Array<{
       id: string;
@@ -169,19 +233,13 @@ export async function getNotionTasksResponse(
       configuredWorkblocksDataSourceId || DEFAULT_WORKBLOCKS_DATA_SOURCE_ID;
 
     try {
-      const workblocksResponse = await fetch(
-        `https://api.notion.com/v1/data_sources/${workblocksDataSourceId}/query`,
-        {
-          method: "POST",
-          headers: notionHeaders(token),
-          body: JSON.stringify({ page_size: 100 }),
-        },
+      const workblocksResult = await queryDataSource(
+        token,
+        workblocksDataSourceId,
+        {},
       );
-      if (workblocksResponse.ok) {
-        const workblocksPayload = (await workblocksResponse.json()) as {
-          results?: NotionPage[];
-        };
-        for (const workblock of workblocksPayload.results ?? []) {
+      if (!workblocksResult.response) {
+        for (const workblock of workblocksResult.results) {
           const taskId =
             workblock.properties?.["Roadmap task"]?.relation?.[0]?.id;
           const actualHours =
@@ -200,50 +258,59 @@ export async function getNotionTasksResponse(
     }
 
     try {
-      const usersResponse = await fetch(
-        "https://api.notion.com/v1/users?page_size=100",
-        { headers: notionHeaders(token) },
-      );
-      if (usersResponse.ok) {
-        const usersPayload = (await usersResponse.json()) as {
-          results?: NotionUser[];
-        };
-        people = (usersPayload.results ?? [])
-          .filter((user) => user.id && user.name && user.type !== "bot")
-          .map((user) => ({
-            id: user.id,
-            name: user.name ?? "Onbekende gebruiker",
-            avatarUrl: user.avatar_url ?? null,
-            email: user.person?.email ?? null,
-          }))
-          .sort((a, b) => a.name.localeCompare(b.name, "nl"));
-      }
+      people = (await listUsers(token))
+        .filter((user) => user.id && user.name && user.type !== "bot")
+        .map((user) => ({
+          id: user.id,
+          name: user.name ?? "Onbekende gebruiker",
+          avatarUrl: user.avatar_url ?? null,
+          email: user.person?.email ?? null,
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name, "nl"));
     } catch {
       // Owner selection remains optional if the integration cannot list users.
     }
 
-    const titles = new Map(
-      pages.map((page) => [page.id, plainText(page.properties?.Task)]),
-    );
+    const pagesById = new Map(pages.map((page) => [page.id, page]));
+    const resolveEpic = (page: NotionPage) => {
+      const directParentId =
+        page.properties?.["Parent task"]?.relation?.[0]?.id;
+      let parentId = directParentId;
+      const seen = new Set<string>();
+
+      while (parentId && !seen.has(parentId)) {
+        seen.add(parentId);
+        const parent = pagesById.get(parentId);
+        if (!parent) break;
+        if (selectName(parent.properties?.["Task type"]) === "Epic") {
+          return { directParentId, epic: parent };
+        }
+        parentId = parent.properties?.["Parent task"]?.relation?.[0]?.id;
+      }
+
+      return { directParentId, epic: undefined };
+    };
     const accents = ["blue", "violet", "amber", "mint"] as const;
 
     const tasks = pages
       .filter(
         (page) =>
-          selectName(page.properties?.["Task type"]) !== "Epic" &&
-          selectName(page.properties?.Status) !== "Done",
+          selectName(page.properties?.["Task type"]) !== "Epic",
       )
       .map((page, index) => {
         const properties = page.properties ?? {};
-        const parentId = properties["Parent task"]?.relation?.[0]?.id;
+        const { directParentId, epic } = resolveEpic(page);
         const workDate = properties["Work date"]?.date?.start;
 
         return {
           id: page.id,
           url: page.url,
           title: plainText(properties.Task) || "Naamloze taak",
-          epic: (parentId && titles.get(parentId)) || "Powerselect Roadmap",
-          parentEpicId: parentId ?? null,
+          epic:
+            (epic && plainText(epic.properties?.Task)) ||
+            "Powerselect Roadmap",
+          parentEpicId: epic?.id ?? null,
+          directParentId: directParentId ?? null,
           taskType:
             selectName(properties["Task type"]) === "Feature"
               ? "Feature"
@@ -260,6 +327,7 @@ export async function getNotionTasksResponse(
             ? new Date(workDate).toLocaleTimeString("nl-NL", {
                 hour: "2-digit",
                 minute: "2-digit",
+                timeZone: "Europe/Amsterdam",
               })
             : undefined,
           nextAction: plainText(properties["Next action"]),
@@ -473,6 +541,7 @@ export async function createNotionTaskResponse(
           ? new Date(workDate).toLocaleTimeString("nl-NL", {
               hour: "2-digit",
               minute: "2-digit",
+              timeZone: "Europe/Amsterdam",
             })
           : undefined,
         nextAction,

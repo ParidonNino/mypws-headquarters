@@ -125,6 +125,114 @@ test("adds completed Workblocks time to the roadmap task", async () => {
   }
 });
 
+test("loads every roadmap page and resolves nested subtasks to their epic", async () => {
+  const originalFetch = globalThis.fetch;
+  const featureId = "39641e9d-4d52-8222-a73a-ff053b6c5c4c";
+  const epicId = "39641e9d-4d52-8333-a73a-ff053b6c5c4c";
+  let roadmapQueries = 0;
+
+  globalThis.fetch = async (url, init) => {
+    if (String(url).includes("/roadmap/")) {
+      roadmapQueries += 1;
+      const body = JSON.parse(init.body);
+      if (!body.start_cursor) {
+        return Response.json({
+          results: [
+            {
+              id: taskId,
+              properties: {
+                Task: {
+                  type: "title",
+                  title: [{ plain_text: "Geneste subtask" }],
+                },
+                "Task type": {
+                  type: "select",
+                  select: { name: "Subtask" },
+                },
+                Status: {
+                  type: "select",
+                  select: { name: "Done" },
+                },
+                "Parent task": {
+                  type: "relation",
+                  relation: [{ id: featureId }],
+                },
+              },
+            },
+          ],
+          has_more: true,
+          next_cursor: "page-2",
+        });
+      }
+
+      return Response.json({
+        results: [
+          {
+            id: featureId,
+            properties: {
+              Task: {
+                type: "title",
+                title: [{ plain_text: "Telemetry feature" }],
+              },
+              "Task type": {
+                type: "select",
+                select: { name: "Feature" },
+              },
+              Status: {
+                type: "select",
+                select: { name: "In Progress" },
+              },
+              "Parent task": {
+                type: "relation",
+                relation: [{ id: epicId }],
+              },
+            },
+          },
+          {
+            id: epicId,
+            properties: {
+              Task: {
+                type: "title",
+                title: [{ plain_text: "Refactor Datafetcher service" }],
+              },
+              "Task type": {
+                type: "select",
+                select: { name: "Epic" },
+              },
+              Status: {
+                type: "select",
+                select: { name: "In Progress" },
+              },
+            },
+          },
+        ],
+        has_more: false,
+      });
+    }
+
+    return Response.json({ results: [], has_more: false });
+  };
+
+  try {
+    const response = await getNotionTasksResponse(
+      "secret",
+      "roadmap",
+      "workblocks",
+    );
+    const payload = await response.json();
+    const nestedTask = payload.tasks.find((task) => task.id === taskId);
+
+    assert.equal(response.status, 200);
+    assert.equal(roadmapQueries, 2);
+    assert.equal(nestedTask.status, "done");
+    assert.equal(nestedTask.directParentId, featureId);
+    assert.equal(nestedTask.parentEpicId, epicId);
+    assert.equal(nestedTask.epic, "Refactor Datafetcher service");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("pauses successfully when Workblocks returned no page id", async () => {
   const originalFetch = globalThis.fetch;
   let fetchCalls = 0;

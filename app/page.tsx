@@ -12,6 +12,7 @@ type Task = {
   title: string;
   epic: string;
   parentEpicId?: string;
+  directParentId?: string | null;
   taskType?: "Feature" | "Subtask";
   priority?: "Critical" | "High" | "Medium" | "Low";
   estimate: number;
@@ -74,7 +75,8 @@ type TicketDraft = {
   notes: string;
   ownerId: string;
   parentEpicId: string;
-  schedule: "keep" | "none" | "today" | "tomorrow";
+  schedule: "keep" | "none" | "today" | "tomorrow" | "custom";
+  customDate: string;
 };
 
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -99,6 +101,7 @@ const emptyTicketDraft = (): TicketDraft => ({
   ownerId: "",
   parentEpicId: "",
   schedule: "none",
+  customDate: "",
 });
 
 const ROADMAP_FALLBACK_TIME = Date.now();
@@ -166,25 +169,44 @@ const dayFormatter = new Intl.DateTimeFormat("nl-NL", {
   day: "numeric",
   month: "short",
 });
-const days: Array<{
-  key: DayKey;
+type CalendarDay = {
+  key: string;
+  relativeKey?: DayKey;
   label: string;
   date: string;
-}> = (
-  [
-    ["yesterday", "Gisteren", -1],
-    ["today", "Vandaag", 0],
-    ["tomorrow", "Morgen", 1],
-  ] as const
-).map(([key, label, offset]) => {
-  const date = new Date(DAY_REFERENCE);
-  date.setDate(date.getDate() + offset);
-  return {
-    key,
-    label,
-    date: dayFormatter.format(date),
-  };
-});
+  isToday: boolean;
+};
+
+function localDateKey(date: Date) {
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+function calendarDays(periodOffset: number): CalendarDay[] {
+  const relativeKeys: DayKey[] = ["yesterday", "today", "tomorrow"];
+  const labels = ["Gisteren", "Vandaag", "Morgen"];
+
+  return [-1, 0, 1].map((dayOffset, index) => {
+    const date = new Date(DAY_REFERENCE);
+    date.setDate(date.getDate() + periodOffset + dayOffset);
+    return {
+      key: localDateKey(date),
+      relativeKey:
+        periodOffset === 0 ? relativeKeys[index] : undefined,
+      label:
+        periodOffset === 0
+          ? labels[index]
+          : new Intl.DateTimeFormat("nl-NL", {
+              weekday: "long",
+            }).format(date),
+      date: dayFormatter.format(date),
+      isToday: localDateKey(date) === localDateKey(DAY_REFERENCE),
+    };
+  });
+}
 const CURRENT_DATE_HEADING = new Intl.DateTimeFormat("nl-NL", {
   weekday: "long",
   day: "numeric",
@@ -216,6 +238,24 @@ function workDateFor(day: DayKey, slot: string) {
   const [hours, minutes] = slot.split(":").map(Number);
   date.setHours(hours, minutes, 0, 0);
   return date.toISOString();
+}
+
+function workDateForCalendarDate(dateKey: string, slot: string) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const [hours, minutes] = slot.split(":").map(Number);
+  return new Date(year, month - 1, day, hours, minutes, 0, 0).toISOString();
+}
+
+function relativeDayForDate(dateKey: string): DayKey | undefined {
+  const difference = Math.round(
+    (new Date(`${dateKey}T12:00:00`).getTime() -
+      new Date(`${localDateKey(DAY_REFERENCE)}T12:00:00`).getTime()) /
+      86_400_000,
+  );
+  if (difference === -1) return "yesterday";
+  if (difference === 0) return "today";
+  if (difference === 1) return "tomorrow";
+  return undefined;
 }
 
 function elapsedSince(startedAt: string) {
@@ -327,6 +367,7 @@ export default function Home() {
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [saveMessage, setSaveMessage] = useState("");
   const [weekOffset, setWeekOffset] = useState(0);
+  const [calendarOffset, setCalendarOffset] = useState(0);
   const [weeklyPlan, setWeeklyPlan] = useState<WeeklyPlan>(emptyWeeklyPlan);
   const [ticketDraft, setTicketDraft] =
     useState<TicketDraft>(emptyTicketDraft);
@@ -334,7 +375,9 @@ export default function Home() {
   const [ticketSaveState, setTicketSaveState] =
     useState<SaveState>("idle");
   const [ticketSaveMessage, setTicketSaveMessage] = useState("");
-  const [editingTicketId, setEditingTicketId] = useState<string | null>(
+  const [editingTicketId, setEditingTicketId] = useState<
+    number | string | null
+  >(
     null,
   );
   const [people, setPeople] = useState<Person[]>([]);
@@ -384,6 +427,44 @@ export default function Home() {
     [filteredTasks],
   );
   const selectedWeek = useMemo(() => weekDetails(weekOffset), [weekOffset]);
+  const days = useMemo(
+    () => calendarDays(calendarOffset),
+    [calendarOffset],
+  );
+  const planningSummary = useMemo(() => {
+    const todayKey = localDateKey(DAY_REFERENCE);
+    const monday = new Date(DAY_REFERENCE);
+    const weekDay = monday.getDay() || 7;
+    monday.setDate(monday.getDate() - weekDay + 1);
+    monday.setHours(0, 0, 0, 0);
+    const nextMonday = new Date(monday);
+    nextMonday.setDate(nextMonday.getDate() + 7);
+    const scheduledTasks = tasks.filter(
+      (task) => task.taskType !== "Feature" && task.workDate,
+    );
+    const todayTasks = scheduledTasks.filter(
+      (task) =>
+        task.workDate &&
+        localDateKey(new Date(task.workDate)) === todayKey,
+    );
+    const hours = (items: Task[]) =>
+      items.reduce(
+        (total, task) => total + (task.plannedHours ?? task.estimate),
+        0,
+      );
+
+    return {
+      weekPlannedHours: hours(
+        scheduledTasks.filter((task) => {
+          const date = new Date(task.workDate as string);
+          return date >= monday && date < nextMonday;
+        }),
+      ),
+      todayPlannedHours: hours(todayTasks),
+      todayDone: todayTasks.filter((task) => task.status === "done").length,
+      todayTotal: todayTasks.length,
+    };
+  }, [tasks]);
   const roadmapRange = useMemo(() => {
     const dates = epics
       .flatMap((epic) => [epic.plannedStart, epic.plannedEnd])
@@ -427,9 +508,13 @@ export default function Home() {
     if (savedTasks) {
       try {
         const localTasks = JSON.parse(savedTasks) as Task[];
-        queueMicrotask(() => {
-          if (!cancelled) setTasks(localTasks);
-        });
+        if (Array.isArray(localTasks) && localTasks.length > 0) {
+          queueMicrotask(() => {
+            if (!cancelled) setTasks(localTasks);
+          });
+        } else {
+          window.localStorage.removeItem("powerselect-planner-tasks");
+        }
       } catch {
         window.localStorage.removeItem("powerselect-planner-tasks");
       }
@@ -473,7 +558,22 @@ export default function Home() {
           const firstTask =
             connectedTasks.find(
               (task) => savedSession && String(task.id) === savedSession.taskId,
-            ) ?? connectedTasks[0];
+            ) ??
+            connectedTasks.find(
+              (task) => task.day === "today" && task.status !== "done",
+            ) ??
+            connectedTasks.find((task) => task.status !== "done") ??
+            connectedTasks[0];
+          if (
+            savedSession &&
+            !connectedTasks.some(
+              (task) => String(task.id) === savedSession?.taskId,
+            )
+          ) {
+            savedSession = null;
+            setActiveSession(null);
+            window.localStorage.removeItem("powerselect-active-workblock");
+          }
           setTasks(connectedTasks);
           setSelectedId(firstTask.id);
           setNote(firstTask.nextAction ?? "");
@@ -578,7 +678,7 @@ export default function Home() {
     );
   }
 
-  async function moveTask(id: number | string, day: DayKey) {
+  async function moveTask(id: number | string, day: CalendarDay) {
     const target = tasks.find((task) => String(task.id) === String(id));
     if (!target) return;
     const previous = {
@@ -587,12 +687,13 @@ export default function Home() {
       workDate: target.workDate,
     };
     const slot = target.slot ?? "09:00";
-    const workDate = workDateFor(day, slot);
+    const workDate = workDateForCalendarDate(day.key, slot);
+    const relativeDay = relativeDayForDate(day.key);
 
     setTasks((current) =>
       current.map((task) =>
         String(task.id) === String(id)
-          ? { ...task, day, slot, workDate }
+          ? { ...task, day: relativeDay, slot, workDate }
           : task,
       ),
     );
@@ -668,7 +769,33 @@ export default function Home() {
     if (saveState === "saving" || selected.status === "running") return;
 
     if (notionState !== "connected" || typeof selected.id !== "string") {
-      setLocalStatus(selected.id, "running");
+      const startedAt = new Date().toISOString();
+      if (activeSession && activeSession.taskId !== String(selected.id)) {
+        const previousSeconds = elapsedSince(activeSession.startedAt);
+        setTasks((current) =>
+          current.map((task) =>
+            String(task.id) === activeSession.taskId
+              ? {
+                  ...task,
+                  status: "paused",
+                  loggedSeconds:
+                    (task.loggedSeconds ?? 0) + previousSeconds,
+                }
+              : task,
+          ),
+        );
+      }
+      setTasks((current) =>
+        current.map((task) =>
+          String(task.id) === String(selected.id)
+            ? { ...task, status: "running" }
+            : task.status === "running"
+              ? { ...task, status: "paused" }
+              : task,
+        ),
+      );
+      rememberSession({ taskId: String(selected.id), startedAt });
+      setElapsedSeconds(selected.loggedSeconds ?? 0);
       return;
     }
 
@@ -731,7 +858,22 @@ export default function Home() {
     if (saveState === "saving" || selected.status !== "running") return;
 
     if (notionState !== "connected" || typeof selected.id !== "string") {
-      setLocalStatus(selected.id, "paused");
+      const session =
+        activeSession?.taskId === String(selected.id) ? activeSession : null;
+      const sessionSeconds = session ? elapsedSince(session.startedAt) : 0;
+      setTasks((current) =>
+        current.map((task) =>
+          String(task.id) === String(selected.id)
+            ? {
+                ...task,
+                status: "paused",
+                loggedSeconds: (task.loggedSeconds ?? 0) + sessionSeconds,
+              }
+            : task,
+        ),
+      );
+      if (session) rememberSession(null);
+      setElapsedSeconds((selected.loggedSeconds ?? 0) + sessionSeconds);
       return;
     }
 
@@ -761,7 +903,22 @@ export default function Home() {
     if (saveState === "saving" || selected.status === "done") return;
 
     if (notionState !== "connected" || typeof selected.id !== "string") {
-      setLocalStatus(selected.id, "done");
+      const session =
+        activeSession?.taskId === String(selected.id) ? activeSession : null;
+      const sessionSeconds = session ? elapsedSince(session.startedAt) : 0;
+      setTasks((current) =>
+        current.map((task) =>
+          String(task.id) === String(selected.id)
+            ? {
+                ...task,
+                status: "done",
+                loggedSeconds: (task.loggedSeconds ?? 0) + sessionSeconds,
+              }
+            : task,
+        ),
+      );
+      if (session) rememberSession(null);
+      setElapsedSeconds((selected.loggedSeconds ?? 0) + sessionSeconds);
       return;
     }
 
@@ -864,12 +1021,14 @@ export default function Home() {
 
   function openTicketForm(
     schedule: TicketDraft["schedule"] = "none",
+    customDate = "",
   ) {
     setEditingTicketId(null);
     setTicketDraft({
       ...emptyTicketDraft(),
       parentEpicId: activeEpic?.id ?? "",
       schedule,
+      customDate,
     });
     setTicketSaveState("idle");
     setTicketSaveMessage("");
@@ -877,7 +1036,6 @@ export default function Home() {
   }
 
   function openEditTicket(task: Task) {
-    if (typeof task.id !== "string") return;
     setSelectedId(task.id);
     setNote(task.nextAction ?? "");
     setEditingTicketId(task.id);
@@ -891,6 +1049,7 @@ export default function Home() {
       ownerId: task.owner?.id ?? "",
       parentEpicId: task.parentEpicId ?? "",
       schedule: "keep",
+      customDate: "",
     });
     setTicketSaveState("idle");
     setTicketSaveMessage("");
@@ -899,7 +1058,7 @@ export default function Home() {
 
   async function saveTicket(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (notionState !== "connected") {
+    if (notionState !== "connected" && notionState !== "demo") {
       setTicketSaveState("error");
       setTicketSaveMessage("Notion is nog niet verbonden");
       return;
@@ -917,7 +1076,15 @@ export default function Home() {
         ? editingTask?.workDate ?? null
         : ticketDraft.schedule === "none"
         ? null
-        : workDateFor(ticketDraft.schedule, "09:00");
+        : ticketDraft.schedule === "custom"
+          ? workDateForCalendarDate(ticketDraft.customDate, "09:00")
+          : workDateFor(ticketDraft.schedule, "09:00");
+    const preserveDirectParent =
+      editingTask &&
+      editingTask.parentEpicId === parentEpic?.id;
+    const targetParentId = preserveDirectParent
+      ? editingTask.directParentId ?? parentEpic?.id ?? null
+      : parentEpic?.id ?? null;
 
     setTicketSaveState("saving");
     setTicketSaveMessage(
@@ -934,16 +1101,63 @@ export default function Home() {
         nextAction: ticketDraft.nextAction,
         notes: ticketDraft.notes,
         ownerId: ticketDraft.ownerId || null,
-        parentEpicId: parentEpic?.id ?? null,
+        parentEpicId: targetParentId,
         epicTitle: parentEpic?.title,
         workDate,
       };
+
+      if (notionState === "demo") {
+        const localId = editingTicketId ?? Date.now();
+        const nextDay = workDate
+          ? relativeDayForDate(localDateKey(new Date(workDate)))
+          : undefined;
+        const localTask: Task = {
+          id: localId,
+          title: ticketDraft.title.trim(),
+          epic:
+            parentEpic?.title ??
+            editingTask?.epic ??
+            "Powerselect Roadmap",
+          parentEpicId: parentEpic?.id ?? editingTask?.parentEpicId,
+          directParentId:
+            targetParentId ?? editingTask?.directParentId ?? null,
+          taskType: ticketDraft.taskType,
+          priority: ticketDraft.priority,
+          estimate,
+          plannedHours: null,
+          loggedSeconds: editingTask?.loggedSeconds ?? 0,
+          status: editingTask?.status ?? "ready",
+          day: nextDay,
+          workDate,
+          slot: workDate ? "09:00" : undefined,
+          nextAction: ticketDraft.nextAction,
+          notes: ticketDraft.notes,
+          owner:
+            people.find((person) => person.id === ticketDraft.ownerId) ?? null,
+          accent: editingTask?.accent ?? "blue",
+        };
+        setTasks((current) =>
+          editingTicketId
+            ? current.map((task) =>
+                String(task.id) === String(editingTicketId)
+                  ? localTask
+                  : task,
+              )
+            : [localTask, ...current],
+        );
+        setSelectedId(localId);
+        setNote(localTask.nextAction ?? "");
+        setTicketSaveState("saved");
+        setTicketSaveMessage("Lokaal opgeslagen in de voorbeeldplanner");
+        setTicketFormOpen(false);
+        return;
+      }
 
       if (editingTicketId) {
         await apiRequest("/api/notion/tasks", {
           method: "PATCH",
           body: JSON.stringify({
-            pageId: editingTicketId,
+            pageId: String(editingTicketId),
             ...ticketPayload,
           }),
         });
@@ -955,12 +1169,13 @@ export default function Home() {
               : ticketDraft.schedule;
         setTasks((current) =>
           current.map((task) =>
-            String(task.id) === editingTicketId
+            String(task.id) === String(editingTicketId)
               ? {
                   ...task,
                   title: ticketDraft.title.trim(),
                   epic: parentEpic?.title ?? "Powerselect Roadmap",
                   parentEpicId: parentEpic?.id,
+                  directParentId: targetParentId,
                   taskType: ticketDraft.taskType,
                   priority: ticketDraft.priority,
                   estimate,
@@ -1112,9 +1327,18 @@ export default function Home() {
         </div>
         <div className="capacity">
           <span>Weekcapaciteit</span>
-          <strong>20 / 25 uur</strong>
+          <strong>
+            {planningSummary.weekPlannedHours} / 25 uur
+          </strong>
           <div className="progress-track">
-            <span />
+            <span
+              style={{
+                width: `${Math.min(
+                  100,
+                  (planningSummary.weekPlannedHours / 25) * 100,
+                )}%`,
+              }}
+            />
           </div>
         </div>
       </section>
@@ -1262,9 +1486,25 @@ export default function Home() {
         <section className="calendar-panel">
           <div className="calendar-toolbar">
             <div className="date-controls">
-              <button aria-label="Vorige periode">‹</button>
-              <button className="today-button">Vandaag</button>
-              <button aria-label="Volgende periode">›</button>
+              <button
+                aria-label="Vorige periode"
+                onClick={() => setCalendarOffset((current) => current - 3)}
+              >
+                ‹
+              </button>
+              <button
+                className="today-button"
+                onClick={() => setCalendarOffset(0)}
+                disabled={calendarOffset === 0}
+              >
+                Vandaag
+              </button>
+              <button
+                aria-label="Volgende periode"
+                onClick={() => setCalendarOffset((current) => current + 3)}
+              >
+                ›
+              </button>
             </div>
             <div className="view-switch">
               <button className="view-active">3 dagen</button>
@@ -1275,7 +1515,10 @@ export default function Home() {
           <div className="days-grid">
             {days.map((day) => {
               const dayTasks = filteredTasks.filter(
-                (task) => task.day === day.key,
+                (task) =>
+                  (task.workDate
+                    ? localDateKey(new Date(task.workDate)) === day.key
+                    : Boolean(task.day) && task.day === day.relativeKey),
               );
               const plannedHours = dayTasks.reduce(
                 (total, task) =>
@@ -1284,17 +1527,17 @@ export default function Home() {
               );
               return (
                 <section
-                  className={`day-column ${day.key === "today" ? "is-today" : ""}`}
+                  className={`day-column ${day.isToday ? "is-today" : ""}`}
                   key={day.key}
                   onDragOver={(event) => event.preventDefault()}
                   onDrop={(event) =>
-                    moveTask(event.dataTransfer.getData("text/plain"), day.key)
+                    moveTask(event.dataTransfer.getData("text/plain"), day)
                   }
                 >
                   <header>
                     <div>
                       <span>{day.label}</span>
-                      {day.key === "today" && <i>NU</i>}
+                      {day.isToday && <i>NU</i>}
                       <strong>{day.date}</strong>
                     </div>
                     <small>{plannedHours}u gepland</small>
@@ -1312,7 +1555,7 @@ export default function Home() {
                         onClick={() => selectTask(task)}
                         onDoubleClick={() => openEditTicket(task)}
                         data-selected={selected.id === task.id}
-                        title="Dubbelklik om dit ticket te bewerken"
+                        title="Selecteer de taak of open het ticket"
                       >
                         <span className="task-time">{task.slot}</span>
                         <strong>{task.title}</strong>
@@ -1325,6 +1568,17 @@ export default function Home() {
                             {statusLabel[task.status]}
                           </span>
                         </div>
+                        <button
+                          type="button"
+                          className="calendar-task-open"
+                          draggable={false}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            openEditTicket(task);
+                          }}
+                        >
+                          Openen
+                        </button>
                       </article>
                     ))}
 
@@ -1339,9 +1593,7 @@ export default function Home() {
                     <button
                       className="add-block"
                       onClick={() =>
-                        openTicketForm(
-                          day.key === "tomorrow" ? "tomorrow" : "today",
-                        )
+                        openTicketForm("custom", day.key)
                       }
                     >
                       + Nieuwe taak
@@ -1446,12 +1698,14 @@ export default function Home() {
 
           <div className="today-summary">
             <div>
-              <span>Vandaag gewerkt</span>
-              <strong>3u 12m</strong>
+              <span>Vandaag gepland</span>
+              <strong>{planningSummary.todayPlannedHours}u</strong>
             </div>
             <div>
-              <span>Focus score</span>
-              <strong>84%</strong>
+              <span>Vandaag klaar</span>
+              <strong>
+                {planningSummary.todayDone} / {planningSummary.todayTotal}
+              </strong>
             </div>
           </div>
         </aside>
@@ -1874,8 +2128,8 @@ export default function Home() {
                 </label>
                 <label>
                   Inplannen
-                  <select
-                    value={ticketDraft.schedule}
+                    <select
+                      value={ticketDraft.schedule}
                     onChange={(event) =>
                       setTicketDraft((current) => ({
                         ...current,
@@ -1886,6 +2140,18 @@ export default function Home() {
                   >
                     {editingTicketId && (
                       <option value="keep">Huidige planning behouden</option>
+                    )}
+                    {ticketDraft.schedule === "custom" && (
+                      <option value="custom">
+                        {new Intl.DateTimeFormat("nl-NL", {
+                          weekday: "long",
+                          day: "numeric",
+                          month: "long",
+                        }).format(
+                          new Date(`${ticketDraft.customDate}T12:00:00`),
+                        )}{" "}
+                        om 09:00
+                      </option>
                     )}
                     <option value="none">Later inplannen</option>
                     <option value="today">Vandaag om 09:00</option>
