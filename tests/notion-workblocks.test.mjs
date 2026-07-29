@@ -41,6 +41,14 @@ test("treats a Notion In Progress ticket as paused without a live session", asyn
                   type: "select",
                   select: { name: "In Progress" },
                 },
+                Notes: {
+                  type: "rich_text",
+                  rich_text: [{ plain_text: "Eerst inventariseren" }],
+                },
+                Owner: {
+                  type: "people",
+                  people: [{ id: workblockId, name: "Nino van Paridon" }],
+                },
               },
             },
           ],
@@ -56,6 +64,8 @@ test("treats a Notion In Progress ticket as paused without a live session", asyn
     const payload = await response.json();
     assert.equal(response.status, 200);
     assert.equal(payload.tasks[0].status, "paused");
+    assert.equal(payload.tasks[0].notes, "Eerst inventariseren");
+    assert.equal(payload.tasks[0].owner.name, "Nino van Paridon");
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -225,6 +235,8 @@ test("creates a new roadmap ticket with its selected epic", async () => {
         priority: "High",
         estimate: 3.5,
         nextAction: "Eerst de bestaande migraties nalopen",
+        notes: "1. Inventariseren\n2. Refactoren",
+        ownerId: workblockId,
         parentEpicId: taskId,
         epicTitle: "Refactor Datafetcher service",
         workDate: "2026-07-30T09:00:00.000Z",
@@ -243,6 +255,11 @@ test("creates a new roadmap ticket with its selected epic", async () => {
       taskId,
     );
     assert.equal(notionBody.properties.Status.select.name, "Todo");
+    assert.equal(
+      notionBody.properties.Notes.rich_text[0].text.content,
+      "1. Inventariseren\n2. Refactoren",
+    );
+    assert.equal(notionBody.properties.Owner.people[0].id, workblockId);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -291,6 +308,8 @@ test("updates all editable roadmap ticket fields", async () => {
         priority: "Critical",
         estimate: 5,
         nextAction: "Review inplannen",
+        notes: "1. Review voorbereiden\n2. Feedback verwerken",
+        ownerId: taskId,
         parentEpicId: workblockId,
         workDate: null,
       }),
@@ -307,6 +326,11 @@ test("updates all editable roadmap ticket fields", async () => {
     );
     assert.equal(notionBody.properties.Priority.select.name, "Critical");
     assert.equal(notionBody.properties["Estimate hours"].number, 5);
+    assert.equal(
+      notionBody.properties.Notes.rich_text[0].text.content,
+      "1. Review voorbereiden\n2. Feedback verwerken",
+    );
+    assert.equal(notionBody.properties.Owner.people[0].id, taskId);
     assert.equal(
       notionBody.properties["Parent task"].relation[0].id,
       workblockId,

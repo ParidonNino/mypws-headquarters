@@ -22,7 +22,16 @@ type Task = {
   workDate?: string | null;
   slot?: string;
   nextAction?: string;
+  notes?: string;
+  owner?: Person | null;
   accent: "blue" | "violet" | "amber" | "mint";
+};
+
+type Person = {
+  id: string;
+  name: string;
+  avatarUrl?: string | null;
+  email?: string | null;
 };
 
 type ActiveSession = {
@@ -62,6 +71,8 @@ type TicketDraft = {
   priority: "Critical" | "High" | "Medium" | "Low";
   estimate: string;
   nextAction: string;
+  notes: string;
+  ownerId: string;
   parentEpicId: string;
   schedule: "keep" | "none" | "today" | "tomorrow";
 };
@@ -84,6 +95,8 @@ const emptyTicketDraft = (): TicketDraft => ({
   priority: "Medium",
   estimate: "2",
   nextAction: "",
+  notes: "",
+  ownerId: "",
   parentEpicId: "",
   schedule: "none",
 });
@@ -301,7 +314,7 @@ export default function Home() {
   const [epics, setEpics] = useState<Epic[]>([]);
   const [activePage, setActivePage] = useState<PageView>("day");
   const [selectedId, setSelectedId] = useState<number | string>(1);
-  const [filter, setFilter] = useState("Actieve epic");
+  const [filter, setFilter] = useState("Actieve epics");
   const [notionState, setNotionState] = useState<
     "loading" | "demo" | "connected" | "error"
   >("loading");
@@ -323,26 +336,49 @@ export default function Home() {
   const [editingTicketId, setEditingTicketId] = useState<string | null>(
     null,
   );
+  const [people, setPeople] = useState<Person[]>([]);
 
   const selected = tasks.find((task) => task.id === selectedId) ?? tasks[0];
-  const activeEpic =
-    epics.find((epic) => epic.status === "In Progress") ?? epics[0];
+  const activeEpics = useMemo(
+    () => epics.filter((epic) => epic.status === "In Progress"),
+    [epics],
+  );
+  const activeEpic = activeEpics[0] ?? epics[0];
   const epicNames = useMemo(
     () => [...new Set(tasks.map((task) => task.epic))].sort(),
     [tasks],
   );
   const filteredTasks = useMemo(() => {
     if (filter === "Alle epics") return tasks;
-    const epicName =
-      filter === "Actieve epic" ? activeEpic?.title : filter;
+    if (filter === "Actieve epics") {
+      const activeIds = new Set(activeEpics.map((epic) => epic.id));
+      return tasks.filter(
+        (task) =>
+          task.parentEpicId && activeIds.has(task.parentEpicId),
+      );
+    }
+    const epicName = filter;
     if (!epicName) return tasks;
     return tasks.filter((task) => task.epic === epicName);
-  }, [activeEpic?.title, filter, tasks]);
+  }, [activeEpics, filter, tasks]);
   const backlog = useMemo(
     () =>
-      filteredTasks.filter(
-        (task) => !task.day && task.status !== "done",
-      ),
+      filteredTasks
+        .filter(
+          (task) =>
+            !task.day &&
+            task.status !== "done" &&
+            task.taskType === "Subtask",
+        )
+        .sort((a, b) => {
+          const priority = { Critical: 0, High: 1, Medium: 2, Low: 3 };
+          return (
+            priority[a.priority ?? "Medium"] -
+              priority[b.priority ?? "Medium"] ||
+            a.epic.localeCompare(b.epic, "nl") ||
+            a.title.localeCompare(b.title, "nl")
+          );
+        }),
     [filteredTasks],
   );
   const selectedWeek = useMemo(() => weekDetails(weekOffset), [weekOffset]);
@@ -431,6 +467,7 @@ export default function Home() {
               : task,
           );
           setEpics((payload.epics as Epic[] | undefined) ?? []);
+          setPeople((payload.people as Person[] | undefined) ?? []);
           const firstTask =
             connectedTasks.find(
               (task) => savedSession && String(task.id) === savedSession.taskId,
@@ -843,6 +880,8 @@ export default function Home() {
       priority: task.priority ?? "Medium",
       estimate: String(task.estimate),
       nextAction: task.nextAction ?? "",
+      notes: task.notes ?? "",
+      ownerId: task.owner?.id ?? "",
       parentEpicId: task.parentEpicId ?? "",
       schedule: "keep",
     });
@@ -886,6 +925,8 @@ export default function Home() {
         priority: ticketDraft.priority,
         estimate,
         nextAction: ticketDraft.nextAction,
+        notes: ticketDraft.notes,
+        ownerId: ticketDraft.ownerId || null,
         parentEpicId: parentEpic?.id ?? null,
         epicTitle: parentEpic?.title,
         workDate,
@@ -917,6 +958,11 @@ export default function Home() {
                   priority: ticketDraft.priority,
                   estimate,
                   nextAction: ticketDraft.nextAction,
+                  notes: ticketDraft.notes,
+                  owner:
+                    people.find(
+                      (person) => person.id === ticketDraft.ownerId,
+                    ) ?? null,
                   workDate,
                   day: nextDay,
                   slot:
@@ -939,12 +985,25 @@ export default function Home() {
             body: JSON.stringify(ticketPayload),
           },
         );
-        setTasks((current) => [result.task, ...current]);
+        setTasks((current) => [
+          {
+            ...result.task,
+            owner:
+              people.find(
+                (person) => person.id === ticketDraft.ownerId,
+              ) ?? null,
+          },
+          ...current,
+        ]);
         setSelectedId(result.task.id);
         setNote(result.task.nextAction ?? "");
       }
       setFilter(
-        parentEpic ? parentEpic.title : "Alle epics",
+        parentEpic?.status === "In Progress"
+          ? "Actieve epics"
+          : parentEpic
+            ? parentEpic.title
+            : "Alle epics",
       );
       setTicketSaveState("saved");
       setTicketSaveMessage(
@@ -1072,7 +1131,7 @@ export default function Home() {
               value={filter}
               onChange={(event) => setFilter(event.target.value)}
             >
-              <option>Actieve epic</option>
+              <option>Actieve epics</option>
               <option>Alle epics</option>
               {epicNames.map((epicName) => (
                 <option key={epicName}>{epicName}</option>
@@ -1080,12 +1139,33 @@ export default function Home() {
             </select>
           </div>
 
-          {activeEpic && <div className="active-epic-card">
+          {activeEpics.length > 0 && activeEpic && <div className="active-epic-card">
             <div className="epic-card-top">
               <span className="epic-icon">⌁</span>
-              <span>ACTIEVE EPIC</span>
+              <span>
+                {activeEpics.length === 1
+                  ? "ACTIEVE EPIC"
+                  : `${activeEpics.length} ACTIEVE EPICS`}
+              </span>
             </div>
-            <strong>{activeEpic.title}</strong>
+            <div className="active-epic-list">
+              {activeEpics.map((epic) => (
+                <div key={epic.id}>
+                  <strong>{epic.title}</strong>
+                  <span>
+                    {
+                      tasks.filter(
+                        (task) =>
+                          task.parentEpicId === epic.id &&
+                          task.taskType === "Subtask" &&
+                          task.status !== "done",
+                      ).length
+                    }{" "}
+                    open subtasks
+                  </span>
+                </div>
+              ))}
+            </div>
             <div className="epic-progress-row">
               <div className="progress-track dark">
                 <span
@@ -1114,14 +1194,34 @@ export default function Home() {
                 onClick={() => selectTask(task)}
                 onDoubleClick={() => openEditTicket(task)}
                 data-selected={selected.id === task.id}
-                title="Dubbelklik om dit ticket te bewerken"
+                title="Sleep naar je agenda of open de taak"
               >
                 <span className={`task-accent ${task.accent}`} />
                 <div className="task-copy">
                   <strong>{task.title}</strong>
                   <span>{task.epic}</span>
                   <div>
+                    <span
+                      className={`priority-badge ${(task.priority ?? "Medium").toLowerCase()}`}
+                    >
+                      {task.priority ?? "Medium"}
+                    </span>
+                    <span className="task-owner">
+                      {task.owner?.name ?? "Geen eigenaar"}
+                    </span>
+                  </div>
+                  <div className="task-card-actions">
                     <span className="estimate">{task.estimate}u</span>
+                    <button
+                      type="button"
+                      draggable={false}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openEditTicket(task);
+                      }}
+                    >
+                      Openen
+                    </button>
                     <span className="drag-hint">⋮⋮</span>
                   </div>
                 </div>
@@ -1709,6 +1809,28 @@ export default function Home() {
                   </select>
                 </label>
                 <label>
+                  Eigenaar
+                  <select
+                    value={ticketDraft.ownerId}
+                    onChange={(event) =>
+                      setTicketDraft((current) => ({
+                        ...current,
+                        ownerId: event.target.value,
+                      }))
+                    }
+                  >
+                    <option value="">Geen eigenaar</option>
+                    {people.map((person) => (
+                      <option value={person.id} key={person.id}>
+                        {person.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <div className="form-row">
+                <label>
                   Inschatting (uur)
                   <input
                     type="number"
@@ -1725,28 +1847,27 @@ export default function Home() {
                     }
                   />
                 </label>
+                <label>
+                  Inplannen
+                  <select
+                    value={ticketDraft.schedule}
+                    onChange={(event) =>
+                      setTicketDraft((current) => ({
+                        ...current,
+                        schedule: event.target
+                          .value as TicketDraft["schedule"],
+                      }))
+                    }
+                  >
+                    {editingTicketId && (
+                      <option value="keep">Huidige planning behouden</option>
+                    )}
+                    <option value="none">Later inplannen</option>
+                    <option value="today">Vandaag om 09:00</option>
+                    <option value="tomorrow">Morgen om 09:00</option>
+                  </select>
+                </label>
               </div>
-
-              <label>
-                Inplannen
-                <select
-                  value={ticketDraft.schedule}
-                  onChange={(event) =>
-                    setTicketDraft((current) => ({
-                      ...current,
-                      schedule: event.target
-                        .value as TicketDraft["schedule"],
-                    }))
-                  }
-                >
-                  {editingTicketId && (
-                    <option value="keep">Huidige planning behouden</option>
-                  )}
-                  <option value="none">Later inplannen</option>
-                  <option value="today">Vandaag om 09:00</option>
-                  <option value="tomorrow">Morgen om 09:00</option>
-                </select>
-              </label>
 
               <label>
                 Volgende actie
@@ -1760,6 +1881,22 @@ export default function Home() {
                   }
                   placeholder="De eerstvolgende concrete stap…"
                 />
+              </label>
+
+              <label>
+                Mijn stappen
+                <textarea
+                  className="steps-field"
+                  value={ticketDraft.notes}
+                  onChange={(event) =>
+                    setTicketDraft((current) => ({
+                      ...current,
+                      notes: event.target.value,
+                    }))
+                  }
+                  placeholder={"1. Eerste kleine stap\n2. Daarna controleren\n3. Afronden en delen"}
+                />
+                <small>Wordt opgeslagen in Notes op het Notion-ticket.</small>
               </label>
 
               <div className="modal-footer">

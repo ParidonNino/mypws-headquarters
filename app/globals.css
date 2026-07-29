@@ -352,6 +352,30 @@ button {
   margin-bottom: 11px;
 }
 
+.active-epic-list {
+  display: grid;
+  gap: 7px;
+  margin-bottom: 11px;
+}
+
+.active-epic-list > div {
+  display: grid;
+  gap: 2px;
+  padding: 8px 9px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.active-epic-list strong {
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.active-epic-list span {
+  color: #a8bdd2;
+  font-size: 8px;
+}
+
 .epic-progress-row {
   gap: 8px;
 }
@@ -458,6 +482,53 @@ button {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+.task-owner {
+  overflow: hidden;
+  margin-left: 6px;
+  color: var(--muted);
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.priority-badge {
+  padding: 3px 6px;
+  border-radius: 99px;
+  background: #f1f3f6;
+  color: #687487;
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.priority-badge.critical {
+  background: #feeaea;
+  color: #b53c3c;
+}
+
+.priority-badge.high {
+  background: #fff0df;
+  color: #a96119;
+}
+
+.priority-badge.medium {
+  background: #fff7d9;
+  color: #8b721c;
+}
+
+.task-card-actions {
+  margin-top: 7px;
+}
+
+.task-card-actions button {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  color: var(--blue);
+  cursor: pointer;
+  font-size: 8px;
+  font-weight: 800;
 }
 
 .estimate {
@@ -1490,6 +1561,16 @@ button {
 .ticket-modal textarea {
   min-height: 84px;
   resize: vertical;
+}
+
+.ticket-modal textarea.steps-field {
+  min-height: 112px;
+}
+
+.ticket-modal label > small {
+  color: #8a96a7;
+  font-size: 8px;
+  font-weight: 500;
 }
 
 .ticket-modal input:focus,

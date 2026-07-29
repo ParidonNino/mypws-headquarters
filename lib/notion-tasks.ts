@@ -12,6 +12,15 @@ type NotionProperty = {
   number?: number | null;
   date?: { start?: string; end?: string | null } | null;
   relation?: Array<{ id?: string }>;
+  people?: NotionUser[];
+};
+
+type NotionUser = {
+  id: string;
+  name?: string | null;
+  avatar_url?: string | null;
+  type?: string;
+  person?: { email?: string };
 };
 
 type NotionPage = {
@@ -150,6 +159,12 @@ export async function getNotionTasksResponse(
     const payload = (await response.json()) as { results?: NotionPage[] };
     const pages = payload.results ?? [];
     const loggedSeconds = new Map<string, number>();
+    let people: Array<{
+      id: string;
+      name: string;
+      avatarUrl: string | null;
+      email: string | null;
+    }> = [];
     const workblocksDataSourceId =
       configuredWorkblocksDataSourceId || DEFAULT_WORKBLOCKS_DATA_SOURCE_ID;
 
@@ -182,6 +197,29 @@ export async function getNotionTasksResponse(
       }
     } catch {
       // Roadmap planning stays available when Workblocks is not shared yet.
+    }
+
+    try {
+      const usersResponse = await fetch(
+        "https://api.notion.com/v1/users?page_size=100",
+        { headers: notionHeaders(token) },
+      );
+      if (usersResponse.ok) {
+        const usersPayload = (await usersResponse.json()) as {
+          results?: NotionUser[];
+        };
+        people = (usersPayload.results ?? [])
+          .filter((user) => user.id && user.name && user.type !== "bot")
+          .map((user) => ({
+            id: user.id,
+            name: user.name ?? "Onbekende gebruiker",
+            avatarUrl: user.avatar_url ?? null,
+            email: user.person?.email ?? null,
+          }))
+          .sort((a, b) => a.name.localeCompare(b.name, "nl"));
+      }
+    } catch {
+      // Owner selection remains optional if the integration cannot list users.
     }
 
     const titles = new Map(
@@ -225,6 +263,17 @@ export async function getNotionTasksResponse(
               })
             : undefined,
           nextAction: plainText(properties["Next action"]),
+          notes: plainText(properties.Notes),
+          owner: properties.Owner?.people?.[0]
+            ? {
+                id: properties.Owner.people[0].id,
+                name:
+                  properties.Owner.people[0].name ??
+                  "Onbekende gebruiker",
+                avatarUrl:
+                  properties.Owner.people[0].avatar_url ?? null,
+              }
+            : null,
           accent: accents[index % accents.length],
         };
       });
@@ -254,6 +303,7 @@ export async function getNotionTasksResponse(
       syncedAt: new Date().toISOString(),
       tasks,
       epics,
+      people,
     });
   } catch (error) {
     return Response.json(
@@ -287,6 +337,8 @@ export async function createNotionTaskResponse(
       priority?: unknown;
       estimate?: unknown;
       nextAction?: unknown;
+      notes?: unknown;
+      ownerId?: unknown;
       parentEpicId?: unknown;
       epicTitle?: unknown;
       workDate?: unknown;
@@ -323,6 +375,17 @@ export async function createNotionTaskResponse(
         { status: 400 },
       );
     }
+    if (payload.notes !== undefined && typeof payload.notes !== "string") {
+      return Response.json({ error: "Ongeldige stappen" }, { status: 400 });
+    }
+    if (
+      payload.ownerId !== undefined &&
+      payload.ownerId !== null &&
+      payload.ownerId !== "" &&
+      !validPageId(payload.ownerId)
+    ) {
+      return Response.json({ error: "Ongeldige eigenaar" }, { status: 400 });
+    }
     if (
       payload.parentEpicId !== undefined &&
       payload.parentEpicId !== null &&
@@ -343,6 +406,7 @@ export async function createNotionTaskResponse(
     const title = payload.title.trim().slice(0, 160);
     const nextAction =
       typeof payload.nextAction === "string" ? payload.nextAction : "";
+    const notes = typeof payload.notes === "string" ? payload.notes : "";
     const properties: Record<string, unknown> = {
       Task: { title: richText(title) },
       "Task type": { select: { name: payload.taskType } },
@@ -350,8 +414,12 @@ export async function createNotionTaskResponse(
       Priority: { select: { name: payload.priority } },
       "Estimate hours": { number: payload.estimate },
       "Next action": { rich_text: richText(nextAction) },
+      Notes: { rich_text: richText(notes) },
     };
 
+    if (validPageId(payload.ownerId)) {
+      properties.Owner = { people: [{ id: payload.ownerId }] };
+    }
     if (validPageId(payload.parentEpicId)) {
       properties["Parent task"] = {
         relation: [{ id: payload.parentEpicId }],
@@ -408,6 +476,10 @@ export async function createNotionTaskResponse(
             })
           : undefined,
         nextAction,
+        notes,
+        owner: validPageId(payload.ownerId)
+          ? { id: payload.ownerId, name: "Toegewezen" }
+          : null,
         accent: "blue",
       },
     });
@@ -443,6 +515,8 @@ export async function updateNotionTaskResponse(
       priority?: unknown;
       estimate?: unknown;
       nextAction?: unknown;
+      notes?: unknown;
+      ownerId?: unknown;
       parentEpicId?: unknown;
       workDate?: unknown;
     };
@@ -523,6 +597,31 @@ export async function updateNotionTaskResponse(
         );
       }
       properties["Next action"] = { rich_text: richText(payload.nextAction) };
+    }
+
+    if (payload.notes !== undefined) {
+      if (typeof payload.notes !== "string") {
+        return Response.json({ error: "Ongeldige stappen" }, { status: 400 });
+      }
+      properties.Notes = { rich_text: richText(payload.notes) };
+    }
+
+    if (payload.ownerId !== undefined) {
+      if (
+        payload.ownerId !== null &&
+        payload.ownerId !== "" &&
+        !validPageId(payload.ownerId)
+      ) {
+        return Response.json(
+          { error: "Ongeldige eigenaar" },
+          { status: 400 },
+        );
+      }
+      properties.Owner = {
+        people: validPageId(payload.ownerId)
+          ? [{ id: payload.ownerId }]
+          : [],
+      };
     }
 
     if (payload.parentEpicId !== undefined) {
