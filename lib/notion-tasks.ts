@@ -754,6 +754,54 @@ export async function updateNotionTaskResponse(
   }
 }
 
+export async function deleteNotionTaskResponse(
+  request: Request,
+  token?: string,
+) {
+  if (!token || token === "PLAK_HIER_DE_NOTION_SLEUTEL") {
+    return Response.json(
+      { configured: false, error: "NOTION_TOKEN ontbreekt" },
+      { status: 503 },
+    );
+  }
+
+  try {
+    const payload = (await request.json()) as { pageId?: unknown };
+    if (!validPageId(payload.pageId)) {
+      return Response.json(
+        { error: "Ongeldig Notion-ticket" },
+        { status: 400 },
+      );
+    }
+
+    const response = await fetch(
+      `https://api.notion.com/v1/pages/${payload.pageId}`,
+      {
+        method: "PATCH",
+        headers: notionHeaders(token),
+        body: JSON.stringify({ archived: true }),
+      },
+    );
+    if (!response.ok) return notionError(response);
+
+    return Response.json({
+      configured: true,
+      deleted: true,
+      pageId: payload.pageId,
+      deletedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    return Response.json(
+      {
+        configured: true,
+        error: "Notion-ticket verwijderen mislukt",
+        detail: error instanceof Error ? error.message : "Onbekende fout",
+      },
+      { status: 500 },
+    );
+  }
+}
+
 async function updatePage(
   token: string,
   pageId: string,

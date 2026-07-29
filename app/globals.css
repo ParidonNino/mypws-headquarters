@@ -1655,6 +1655,11 @@ button {
   gap: 8px;
 }
 
+.modal-footer > .modal-feedback {
+  min-width: 0;
+  align-items: center;
+}
+
 .modal-footer button {
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -1669,6 +1674,19 @@ button {
 .modal-footer button.primary {
   border-color: var(--blue);
   background: var(--blue);
+  color: #fff;
+}
+
+.modal-footer button.danger {
+  flex: 0 0 auto;
+  border-color: #efc2c2;
+  color: #a62f2f;
+}
+
+.modal-footer button.danger:hover,
+.modal-footer button.danger-confirm {
+  border-color: #b83a3a;
+  background: #b83a3a;
   color: #fff;
 }
 

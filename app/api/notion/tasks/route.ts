@@ -1,5 +1,6 @@
 import {
   createNotionTaskResponse,
+  deleteNotionTaskResponse,
   getNotionTasksResponse,
   updateNotionTaskResponse,
 } from "../../../../lib/notion-tasks";
@@ -22,4 +23,8 @@ export async function POST(request: Request) {
     process.env.NOTION_TOKEN,
     process.env.NOTION_ROADMAP_DATA_SOURCE_ID,
   );
+}
+
+export async function DELETE(request: Request) {
+  return deleteNotionTaskResponse(request, process.env.NOTION_TOKEN);
 }

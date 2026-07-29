@@ -163,6 +163,15 @@ const initialTasks: Task[] = [
   },
 ];
 
+const EMPTY_TASK: Task = {
+  id: "",
+  title: "Geen taak geselecteerd",
+  epic: "Plan of open eerst een ticket",
+  estimate: 0,
+  status: "ready",
+  accent: "blue",
+};
+
 const DAY_REFERENCE = new Date();
 const dayFormatter = new Intl.DateTimeFormat("nl-NL", {
   weekday: "short",
@@ -375,6 +384,7 @@ export default function Home() {
   const [ticketSaveState, setTicketSaveState] =
     useState<SaveState>("idle");
   const [ticketSaveMessage, setTicketSaveMessage] = useState("");
+  const [ticketDeleteArmed, setTicketDeleteArmed] = useState(false);
   const [editingTicketId, setEditingTicketId] = useState<
     number | string | null
   >(
@@ -382,7 +392,8 @@ export default function Home() {
   );
   const [people, setPeople] = useState<Person[]>([]);
 
-  const selected = tasks.find((task) => task.id === selectedId) ?? tasks[0];
+  const selected =
+    tasks.find((task) => task.id === selectedId) ?? tasks[0] ?? EMPTY_TASK;
   const activeEpics = useMemo(
     () => epics.filter((epic) => epic.status === "In Progress"),
     [epics],
@@ -1032,6 +1043,7 @@ export default function Home() {
     });
     setTicketSaveState("idle");
     setTicketSaveMessage("");
+    setTicketDeleteArmed(false);
     setTicketFormOpen(true);
   }
 
@@ -1053,6 +1065,7 @@ export default function Home() {
     });
     setTicketSaveState("idle");
     setTicketSaveMessage("");
+    setTicketDeleteArmed(false);
     setTicketFormOpen(true);
   }
 
@@ -1069,7 +1082,9 @@ export default function Home() {
       (epic) => epic.id === ticketDraft.parentEpicId,
     );
     const editingTask = editingTicketId
-      ? tasks.find((task) => String(task.id) === editingTicketId)
+      ? tasks.find(
+          (task) => String(task.id) === String(editingTicketId),
+        )
       : undefined;
     const workDate =
       ticketDraft.schedule === "keep"
@@ -1238,6 +1253,76 @@ export default function Home() {
       setTicketSaveState("error");
       setTicketSaveMessage(
         error instanceof Error ? error.message : "Opslaan mislukt",
+      );
+    }
+  }
+
+  async function deleteTicket() {
+    if (!editingTicketId || ticketSaveState === "saving") return;
+
+    const editingTask = tasks.find(
+      (task) => String(task.id) === String(editingTicketId),
+    );
+    if (
+      editingTask?.status === "running" ||
+      activeSession?.taskId === String(editingTicketId)
+    ) {
+      setTicketSaveState("error");
+      setTicketSaveMessage(
+        "Pauzeer dit ticket eerst voordat je het verwijdert",
+      );
+      setTicketDeleteArmed(false);
+      return;
+    }
+
+    if (!ticketDeleteArmed) {
+      setTicketDeleteArmed(true);
+      setTicketSaveState("idle");
+      setTicketSaveMessage(
+        "Klik nogmaals om dit ticket definitief te verwijderen",
+      );
+      return;
+    }
+
+    if (notionState !== "connected" && notionState !== "demo") {
+      setTicketSaveState("error");
+      setTicketSaveMessage("Notion is nog niet verbonden");
+      return;
+    }
+
+    setTicketSaveState("saving");
+    setTicketSaveMessage("Ticket verwijderen…");
+    try {
+      if (notionState === "connected") {
+        await apiRequest("/api/notion/tasks", {
+          method: "DELETE",
+          body: JSON.stringify({ pageId: String(editingTicketId) }),
+        });
+      }
+
+      const remainingTasks = tasks.filter(
+        (task) => String(task.id) !== String(editingTicketId),
+      );
+      const nextTask =
+        remainingTasks.find(
+          (task) => task.day === "today" && task.status !== "done",
+        ) ??
+        remainingTasks.find((task) => task.status !== "done") ??
+        remainingTasks[0];
+
+      setTasks(remainingTasks);
+      setSelectedId(nextTask?.id ?? "");
+      setNote(nextTask?.nextAction ?? "");
+      setElapsedSeconds(nextTask?.loggedSeconds ?? 0);
+      setTicketFormOpen(false);
+      setEditingTicketId(null);
+      setTicketDeleteArmed(false);
+      setTicketSaveState("saved");
+      setTicketSaveMessage("");
+    } catch (error) {
+      setTicketSaveState("error");
+      setTicketSaveMessage(
+        error instanceof Error ? error.message : "Verwijderen mislukt",
       );
     }
   }
@@ -2191,9 +2276,27 @@ export default function Home() {
               </label>
 
               <div className="modal-footer">
-                <span className={`save-feedback ${ticketSaveState}`}>
-                  {ticketSaveMessage}
-                </span>
+                <div className="modal-feedback">
+                  {editingTicketId && (
+                    <button
+                      className={
+                        ticketDeleteArmed
+                          ? "danger danger-confirm"
+                          : "danger"
+                      }
+                      type="button"
+                      onClick={deleteTicket}
+                      disabled={ticketSaveState === "saving"}
+                    >
+                      {ticketDeleteArmed
+                        ? "Definitief verwijderen"
+                        : "Ticket verwijderen"}
+                    </button>
+                  )}
+                  <span className={`save-feedback ${ticketSaveState}`}>
+                    {ticketSaveMessage}
+                  </span>
+                </div>
                 <div>
                   <button
                     type="button"

@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   createNotionTaskResponse,
+  deleteNotionTaskResponse,
   getNotionTasksResponse,
   updateNotionTaskResponse,
   updateNotionWorkblockResponse,
@@ -444,6 +445,35 @@ test("updates all editable roadmap ticket fields", async () => {
       workblockId,
     );
     assert.equal(notionBody.properties["Work date"].date, null);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("archives a deleted roadmap ticket in Notion", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestUrl;
+  let notionBody;
+  globalThis.fetch = async (url, init) => {
+    requestUrl = String(url);
+    notionBody = JSON.parse(init.body);
+    return Response.json({});
+  };
+
+  try {
+    const response = await deleteNotionTaskResponse(
+      request({ pageId: taskId }),
+      "secret",
+    );
+    const payload = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(payload.deleted, true);
+    assert.equal(
+      requestUrl,
+      `https://api.notion.com/v1/pages/${taskId}`,
+    );
+    assert.deepEqual(notionBody, { archived: true });
   } finally {
     globalThis.fetch = originalFetch;
   }
