@@ -13,12 +13,39 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Powerselect Werkplanner",
+  metadataBase: new URL(
+    "https://powerselect-werkplanner.nino-van-paridon.chatgpt.site",
+  ),
+  title: "My Powerselect Headquarters",
   description:
-    "Plan je Powerselect-taken in een heldere driedaagse agenda en houd je focus bij.",
+    "Plan je Powerselect-taken vanuit My Powerselect Headquarters.",
   icons: {
-    icon: "/favicon.svg",
-    shortcut: "/favicon.svg",
+    icon: "/powerselect-favicon.png",
+    shortcut: "/powerselect-favicon.png",
+    apple: "/powerselect-favicon.png",
+  },
+  openGraph: {
+    title: "My Powerselect Headquarters",
+    description:
+      "Plan je Powerselect-taken vanuit My Powerselect Headquarters.",
+    siteName: "My Powerselect Headquarters",
+    locale: "nl_NL",
+    type: "website",
+    images: [
+      {
+        url: "/og.png",
+        width: 1732,
+        height: 909,
+        alt: "My Powerselect Headquarters",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "My Powerselect Headquarters",
+    description:
+      "Plan je Powerselect-taken vanuit My Powerselect Headquarters.",
+    images: ["/og.png"],
   },
 };
 

@@ -22,15 +22,16 @@ async function render() {
   );
 }
 
-test("server-renders the Powerselect planner", async () => {
+test("server-renders My Powerselect Headquarters", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
   assert.match(html, /<html lang="nl">/i);
-  assert.match(html, /<title>Powerselect Werkplanner<\/title>/i);
-  assert.match(html, />Powerselect</);
+  assert.match(html, /<title>My Powerselect Headquarters<\/title>/i);
+  assert.match(html, /alt="Powerselect"/);
+  assert.match(html, /My Powerselect Headquarters/);
   assert.match(html, /Mijn dag/);
   assert.match(html, /Roadmap/);
   assert.match(html, /Mijn week/);

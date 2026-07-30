@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 
 type WorkStatus = "ready" | "running" | "paused" | "done";
@@ -1353,11 +1354,15 @@ export default function Home() {
     <main className="app-shell">
       <header className="topbar">
         <div className="brand">
-          <div className="brand-mark">P</div>
-          <div>
-            <strong>Powerselect</strong>
-            <span>Werkplanner</span>
-          </div>
+          <Image
+            className="brand-logo"
+            src="/powerselect-logo.png"
+            alt="Powerselect"
+            width={560}
+            height={65}
+            priority
+          />
+          <span>My Powerselect Headquarters</span>
         </div>
 
         <nav className="top-nav" aria-label="Hoofdnavigatie">

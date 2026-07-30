@@ -1,4 +1,4 @@
-# Powerselect Werkplanner
+# My Powerselect Headquarters
 
 Een Nederlandstalige persoonlijke werkplanner boven op Notion. De planner
 combineert open tickets uit actieve epics met een driedaagse agenda,
