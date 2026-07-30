@@ -392,6 +392,26 @@ function Icon({
   return <span className={`icon icon-${size}`}>{children}</span>;
 }
 
+function ProgressRing({ task }: { task: Task }) {
+  const percentage = taskProgressPercent(task);
+
+  return (
+    <span
+      className="progress-ring"
+      role="img"
+      aria-label={`${percentage}% voltooid`}
+      title={`${percentage}% voltooid`}
+      style={
+        {
+          "--progress-angle": `${percentage * 3.6}deg`,
+        } as React.CSSProperties
+      }
+    >
+      <strong>{percentage}%</strong>
+    </span>
+  );
+}
+
 export default function Home() {
   const [tasks, setTasks] = useState<Task[]>(initialTasks);
   const [epics, setEpics] = useState<Epic[]>([]);
@@ -430,6 +450,10 @@ export default function Home() {
 
   const selected =
     tasks.find((task) => task.id === selectedId) ?? tasks[0] ?? EMPTY_TASK;
+  const parsedProgressInput = Number(progressInput.replace(",", "."));
+  const progressPreview = Number.isFinite(parsedProgressInput)
+    ? Math.min(100, Math.max(0, Math.round(parsedProgressInput)))
+    : taskProgressPercent(selected);
   const activeEpics = useMemo(
     () => epics.filter((epic) => epic.status === "In Progress"),
     [epics],
@@ -1675,7 +1699,10 @@ export default function Home() {
               >
                 <span className={`task-accent ${task.accent}`} />
                 <div className="task-copy">
-                  <strong>{task.title}</strong>
+                  <div className="task-title-row">
+                    <strong>{task.title}</strong>
+                    <ProgressRing task={task} />
+                  </div>
                   <span>{task.epic}</span>
                   <div>
                     <span
@@ -1799,7 +1826,10 @@ export default function Home() {
                         data-selected={selected.id === task.id}
                         title="Selecteer de taak of open het ticket"
                       >
-                        <span className="task-time">{task.slot}</span>
+                        <div className="calendar-task-top">
+                          <span className="task-time">{task.slot}</span>
+                          <ProgressRing task={task} />
+                        </div>
                         <strong>{task.title}</strong>
                         <span>{task.epic}</span>
                         <div className="calendar-task-footer">
@@ -1878,36 +1908,32 @@ export default function Home() {
             >
               <div className="task-progress-heading">
                 <label htmlFor="task-progress-percent">Voortgang</label>
-                <div className="task-progress-value">
-                  <input
-                    id="task-progress-percent"
-                    aria-label="Voortgang in procenten"
-                    type="number"
-                    inputMode="numeric"
-                    min="0"
-                    max="100"
-                    step="1"
-                    value={progressInput}
-                    onChange={(event) => setProgressInput(event.target.value)}
-                    disabled={
-                      selected.status === "done" || saveState === "saving"
-                    }
-                  />
-                  <span>%</span>
-                </div>
+                <output
+                  className="task-progress-value"
+                  htmlFor="task-progress-percent"
+                >
+                  {progressPreview}%
+                </output>
               </div>
-              <div
-                className="task-progress-track"
-                role="progressbar"
-                aria-label="Huidige taakvoortgang"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={taskProgressPercent(selected)}
-              >
-                <span
-                  style={{ width: `${taskProgressPercent(selected)}%` }}
-                />
-              </div>
+              <input
+                id="task-progress-percent"
+                className="task-progress-slider"
+                aria-label="Voortgang in procenten"
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                value={progressPreview}
+                onChange={(event) => setProgressInput(event.target.value)}
+                disabled={
+                  selected.status === "done" || saveState === "saving"
+                }
+                style={
+                  {
+                    "--progress-fill": `${progressPreview}%`,
+                  } as React.CSSProperties
+                }
+              />
               <button
                 type="submit"
                 disabled={selected.status === "done" || saveState === "saving"}
@@ -2294,12 +2320,15 @@ export default function Home() {
                   {editingTicketId ? "Ticket aanpassen" : "Nieuwe taak"}
                 </h2>
               </div>
-              <button
-                aria-label="Sluiten"
-                onClick={() => setTicketFormOpen(false)}
-              >
-                ×
-              </button>
+              <div className="modal-heading-actions">
+                {editingTicketId && <ProgressRing task={selected} />}
+                <button
+                  aria-label="Sluiten"
+                  onClick={() => setTicketFormOpen(false)}
+                >
+                  ×
+                </button>
+              </div>
             </div>
 
             <form onSubmit={saveTicket}>
