@@ -1672,11 +1672,14 @@ button {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fff;
-  padding: 9px 12px;
+  padding: 10px 14px;
   color: var(--ink);
   cursor: pointer;
-  font-size: 10px;
-  font-weight: 750;
+  font-family: var(--font-geist-sans), Arial, sans-serif;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
 }
 
 .modal-footer button.primary {
