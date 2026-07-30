@@ -327,6 +327,10 @@ test("still closes and records a real Workblocks page", async () => {
 
 test("creates a new roadmap ticket with its selected epic", async () => {
   const originalFetch = globalThis.fetch;
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  tomorrow.setHours(9, 0, 0, 0);
+  const tomorrowWorkDate = tomorrow.toISOString();
   let notionBody;
   globalThis.fetch = async (_url, init) => {
     notionBody = JSON.parse(init.body);
@@ -348,7 +352,7 @@ test("creates a new roadmap ticket with its selected epic", async () => {
         ownerId: workblockId,
         parentEpicId: taskId,
         epicTitle: "Refactor Datafetcher service",
-        workDate: "2026-07-30T09:00:00.000Z",
+        workDate: tomorrowWorkDate,
       }),
       "secret",
       "roadmap",

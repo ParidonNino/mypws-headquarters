@@ -1594,7 +1594,7 @@ button {
   display: grid;
   gap: 6px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 750;
 }
 
@@ -1607,9 +1607,17 @@ button {
   background: #fff;
   padding: 10px 11px;
   color: var(--ink);
-  font-family: inherit;
-  font-size: 11px;
+  font-family: var(--font-geist-sans), Arial, sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.45;
   outline: none;
+}
+
+.ticket-modal input::placeholder,
+.ticket-modal textarea::placeholder {
+  color: #98a3b2;
+  font-weight: 400;
 }
 
 .ticket-modal textarea {
