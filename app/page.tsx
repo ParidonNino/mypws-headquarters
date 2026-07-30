@@ -19,6 +19,7 @@ type Task = {
   estimate: number;
   plannedHours?: number | null;
   loggedSeconds?: number;
+  progress?: number;
   status: WorkStatus;
   day?: DayKey;
   workDate?: string | null;
@@ -113,6 +114,7 @@ const initialTasks: Task[] = [
     title: "Database-schema refactor",
     epic: "Datafetcher refactor",
     estimate: 4,
+    progress: 0.35,
     status: "running",
     day: "today",
     slot: "09:00",
@@ -123,6 +125,7 @@ const initialTasks: Task[] = [
     title: "Datafetcher service opschonen",
     epic: "Datafetcher refactor",
     estimate: 3,
+    progress: 0,
     status: "ready",
     day: "today",
     slot: "14:00",
@@ -133,6 +136,7 @@ const initialTasks: Task[] = [
     title: "Migratiescenario uitschrijven",
     epic: "Datafetcher refactor",
     estimate: 2,
+    progress: 0,
     status: "ready",
     accent: "violet",
   },
@@ -141,6 +145,7 @@ const initialTasks: Task[] = [
     title: "Control API requirements nalopen",
     epic: "Control API",
     estimate: 2,
+    progress: 0,
     status: "ready",
     accent: "amber",
   },
@@ -149,6 +154,7 @@ const initialTasks: Task[] = [
     title: "Test met FlexMeasures prediction",
     epic: "Prepare for IChooser pilot",
     estimate: 4,
+    progress: 0,
     status: "ready",
     accent: "mint",
   },
@@ -157,6 +163,7 @@ const initialTasks: Task[] = [
     title: "Bestaande fetch-flow documenteren",
     epic: "Datafetcher refactor",
     estimate: 2,
+    progress: 1,
     status: "done",
     day: "yesterday",
     slot: "13:00",
@@ -169,6 +176,7 @@ const EMPTY_TASK: Task = {
   title: "Geen taak geselecteerd",
   epic: "Plan of open eerst een ticket",
   estimate: 0,
+  progress: 0,
   status: "ready",
   accent: "blue",
 };
@@ -240,6 +248,31 @@ function formatDuration(totalSeconds: number) {
     .map((value) => String(value).padStart(2, "0"))
     .join(":");
 }
+
+function taskProgressPercent(task: Task) {
+  const progress = task.status === "done" ? 1 : (task.progress ?? 0);
+  return Math.round(Math.min(1, Math.max(0, progress)) * 100);
+}
+
+const CONFETTI_COLORS = [
+  "#ff6500",
+  "#2d2358",
+  "#ff9b4a",
+  "#5d4c91",
+  "#f4c25b",
+];
+
+const CONFETTI_PIECES = Array.from({ length: 44 }, (_, index) => ({
+  color: CONFETTI_COLORS[index % CONFETTI_COLORS.length],
+  delay: (index % 8) * 32,
+  duration: 1_750 + (index % 7) * 115,
+  peak: -(58 + ((index * 17) % 34)),
+  start: 47 + ((index * 13) % 7),
+  x: ((index * 41) % 116) - 58,
+  xEnd: ((index * 53) % 126) - 63,
+  rotation: 540 + ((index * 97) % 720),
+  rotationEnd: 1_080 + ((index * 131) % 900),
+}));
 
 function workDateFor(day: DayKey, slot: string) {
   const date = new Date();
@@ -376,6 +409,8 @@ export default function Home() {
   const [activeSession, setActiveSession] = useState<ActiveSession | null>(null);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [saveMessage, setSaveMessage] = useState("");
+  const [progressInput, setProgressInput] = useState("35");
+  const [celebrating, setCelebrating] = useState(false);
   const [weekOffset, setWeekOffset] = useState(0);
   const [calendarOffset, setCalendarOffset] = useState(0);
   const [weeklyPlan, setWeeklyPlan] = useState<WeeklyPlan>(emptyWeeklyPlan);
@@ -522,7 +557,12 @@ export default function Home() {
         const localTasks = JSON.parse(savedTasks) as Task[];
         if (Array.isArray(localTasks) && localTasks.length > 0) {
           queueMicrotask(() => {
-            if (!cancelled) setTasks(localTasks);
+            if (!cancelled) {
+              const localSelected =
+                localTasks.find((task) => task.id === 1) ?? localTasks[0];
+              setTasks(localTasks);
+              setProgressInput(String(taskProgressPercent(localSelected)));
+            }
           });
         } else {
           window.localStorage.removeItem("powerselect-planner-tasks");
@@ -589,6 +629,7 @@ export default function Home() {
           setTasks(connectedTasks);
           setSelectedId(firstTask.id);
           setNote(firstTask.nextAction ?? "");
+          setProgressInput(String(taskProgressPercent(firstTask)));
           setElapsedSeconds(
             (firstTask.loggedSeconds ?? 0) +
               (savedSession && String(firstTask.id) === savedSession.taskId
@@ -682,6 +723,7 @@ export default function Home() {
   function selectTask(task: Task) {
     setSelectedId(task.id);
     setNote(task.nextAction ?? "");
+    setProgressInput(String(taskProgressPercent(task)));
     setElapsedSeconds(
       (task.loggedSeconds ?? 0) +
         (activeSession && String(task.id) === activeSession.taskId
@@ -733,14 +775,79 @@ export default function Home() {
     }
   }
 
-  function setLocalStatus(taskId: number | string, status: WorkStatus) {
+  function setLocalStatus(
+    taskId: number | string,
+    status: WorkStatus,
+    progress?: number,
+  ) {
     setTasks((current) =>
       current.map((task) =>
         String(task.id) === String(taskId)
-          ? { ...task, status }
+          ? {
+              ...task,
+              status,
+              ...(progress === undefined ? {} : { progress }),
+            }
           : task,
       ),
     );
+  }
+
+  async function saveProgress() {
+    if (
+      saveState === "saving" ||
+      selected.status === "done" ||
+      selected.id === ""
+    ) {
+      return;
+    }
+
+    const parsed = Number(progressInput.replace(",", "."));
+    if (!Number.isFinite(parsed) || parsed < 0 || parsed > 100) {
+      setFeedback("error", "Vul een percentage tussen 0 en 100 in");
+      return;
+    }
+
+    const percentage = Math.round(parsed);
+    const progress = percentage / 100;
+    const previousProgress = selected.progress ?? 0;
+    const taskId = selected.id;
+
+    setProgressInput(String(percentage));
+    setTasks((current) =>
+      current.map((task) =>
+        String(task.id) === String(taskId) ? { ...task, progress } : task,
+      ),
+    );
+
+    if (notionState !== "connected" || typeof taskId !== "string") {
+      setFeedback("saved", `Voortgang opgeslagen op ${percentage}%`);
+      return;
+    }
+
+    setFeedback("saving", "Voortgang opslaanâ€¦");
+    try {
+      await apiRequest("/api/notion/tasks", {
+        method: "PATCH",
+        body: JSON.stringify({ pageId: taskId, progress }),
+      });
+      setFeedback("saved", `Voortgang opgeslagen op ${percentage}%`);
+    } catch (error) {
+      setTasks((current) =>
+        current.map((task) =>
+          String(task.id) === String(taskId)
+            ? { ...task, progress: previousProgress }
+            : task,
+        ),
+      );
+      setProgressInput(
+        String(Math.round(Math.min(1, Math.max(0, previousProgress)) * 100)),
+      );
+      setFeedback(
+        "error",
+        error instanceof Error ? error.message : "Voortgang opslaan mislukt",
+      );
+    }
   }
 
   async function pauseSession(session: ActiveSession) {
@@ -924,6 +1031,7 @@ export default function Home() {
             ? {
                 ...task,
                 status: "done",
+                progress: 1,
                 loggedSeconds: (task.loggedSeconds ?? 0) + sessionSeconds,
               }
             : task,
@@ -931,6 +1039,8 @@ export default function Home() {
       );
       if (session) rememberSession(null);
       setElapsedSeconds((selected.loggedSeconds ?? 0) + sessionSeconds);
+      setProgressInput("100");
+      setCelebrating(true);
       return;
     }
 
@@ -959,6 +1069,7 @@ export default function Home() {
               ? {
                   ...task,
                   status: "done",
+                  progress: 1,
                   loggedSeconds:
                     (task.loggedSeconds ?? 0) + sessionSeconds,
                 }
@@ -969,8 +1080,10 @@ export default function Home() {
           (selected.loggedSeconds ?? 0) + sessionSeconds,
         );
       } else {
-        setLocalStatus(selected.id, "done");
+        setLocalStatus(selected.id, "done", 1);
       }
+      setProgressInput("100");
+      setCelebrating(true);
       setFeedback(
         "saved",
         session && !result.workblockSaved
@@ -1051,6 +1164,7 @@ export default function Home() {
   function openEditTicket(task: Task) {
     setSelectedId(task.id);
     setNote(task.nextAction ?? "");
+    setProgressInput(String(taskProgressPercent(task)));
     setEditingTicketId(task.id);
     setTicketDraft({
       title: task.title,
@@ -1142,6 +1256,7 @@ export default function Home() {
           estimate,
           plannedHours: null,
           loggedSeconds: editingTask?.loggedSeconds ?? 0,
+          progress: editingTask?.progress ?? 0,
           status: editingTask?.status ?? "ready",
           day: nextDay,
           workDate,
@@ -1163,6 +1278,7 @@ export default function Home() {
         );
         setSelectedId(localId);
         setNote(localTask.nextAction ?? "");
+        setProgressInput(String(taskProgressPercent(localTask)));
         setTicketSaveState("saved");
         setTicketSaveMessage("Lokaal opgeslagen in de voorbeeldplanner");
         setTicketFormOpen(false);
@@ -1215,6 +1331,9 @@ export default function Home() {
         );
         setSelectedId(editingTicketId);
         setNote(ticketDraft.nextAction);
+        if (editingTask) {
+          setProgressInput(String(taskProgressPercent(editingTask)));
+        }
       } else {
         const result = await apiRequest<{ task: Task }>(
           "/api/notion/tasks",
@@ -1235,6 +1354,7 @@ export default function Home() {
         ]);
         setSelectedId(result.task.id);
         setNote(result.task.nextAction ?? "");
+        setProgressInput(String(taskProgressPercent(result.task)));
       }
       setFilter(
         parentEpic?.status === "In Progress"
@@ -1314,6 +1434,9 @@ export default function Home() {
       setTasks(remainingTasks);
       setSelectedId(nextTask?.id ?? "");
       setNote(nextTask?.nextAction ?? "");
+      setProgressInput(
+        nextTask ? String(taskProgressPercent(nextTask)) : "0",
+      );
       setElapsedSeconds(nextTask?.loggedSeconds ?? 0);
       setTicketFormOpen(false);
       setEditingTicketId(null);
@@ -1352,6 +1475,35 @@ export default function Home() {
 
   return (
     <main className="app-shell">
+      {celebrating && (
+        <div
+          className="confetti-layer"
+          aria-hidden="true"
+          onAnimationEnd={(event) => {
+            if (event.currentTarget === event.target) setCelebrating(false);
+          }}
+        >
+          {CONFETTI_PIECES.map((piece, index) => (
+            <span
+              key={index}
+              className="confetti-piece"
+              style={
+                {
+                  "--confetti-color": piece.color,
+                  "--confetti-delay": `${piece.delay}ms`,
+                  "--confetti-duration": `${piece.duration}ms`,
+                  "--confetti-peak": `${piece.peak}vh`,
+                  "--confetti-start": `${piece.start}%`,
+                  "--confetti-x": `${piece.x}vw`,
+                  "--confetti-x-end": `${piece.xEnd}vw`,
+                  "--confetti-rotation": `${piece.rotation}deg`,
+                  "--confetti-rotation-end": `${piece.rotationEnd}deg`,
+                } as React.CSSProperties
+              }
+            />
+          ))}
+        </div>
+      )}
       <header className="topbar">
         <div className="brand">
           <Image
@@ -1716,6 +1868,53 @@ export default function Home() {
             <span>TIJD AAN DEZE TAAK</span>
             <strong>{formatDuration(elapsedSeconds)}</strong>
             <small>van {selected.estimate}:00:00 gepland</small>
+
+            <form
+              className="task-progress"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void saveProgress();
+              }}
+            >
+              <div className="task-progress-heading">
+                <label htmlFor="task-progress-percent">Voortgang</label>
+                <div className="task-progress-value">
+                  <input
+                    id="task-progress-percent"
+                    aria-label="Voortgang in procenten"
+                    type="number"
+                    inputMode="numeric"
+                    min="0"
+                    max="100"
+                    step="1"
+                    value={progressInput}
+                    onChange={(event) => setProgressInput(event.target.value)}
+                    disabled={
+                      selected.status === "done" || saveState === "saving"
+                    }
+                  />
+                  <span>%</span>
+                </div>
+              </div>
+              <div
+                className="task-progress-track"
+                role="progressbar"
+                aria-label="Huidige taakvoortgang"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={taskProgressPercent(selected)}
+              >
+                <span
+                  style={{ width: `${taskProgressPercent(selected)}%` }}
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={selected.status === "done" || saveState === "saving"}
+              >
+                {selected.status === "done" ? "100% voltooid" : "Opslaan"}
+              </button>
+            </form>
           </div>
 
           <div className="control-buttons">

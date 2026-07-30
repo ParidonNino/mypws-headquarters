@@ -42,6 +42,10 @@ test("treats a Notion In Progress ticket as paused without a live session", asyn
                   type: "select",
                   select: { name: "In Progress" },
                 },
+                "Progress %": {
+                  type: "number",
+                  number: 0.4,
+                },
                 Notes: {
                   type: "rich_text",
                   rich_text: [{ plain_text: "Eerst inventariseren" }],
@@ -65,6 +69,7 @@ test("treats a Notion In Progress ticket as paused without a live session", asyn
     const payload = await response.json();
     assert.equal(response.status, 200);
     assert.equal(payload.tasks[0].status, "paused");
+    assert.equal(payload.tasks[0].progress, 0.4);
     assert.equal(payload.tasks[0].notes, "Eerst inventariseren");
     assert.equal(payload.tasks[0].owner.name, "Nino van Paridon");
   } finally {
@@ -287,6 +292,7 @@ test("finishes the roadmap ticket even without a Workblocks page", async () => {
     assert.equal(requests.length, 1);
     assert.equal(requests[0].url, `https://api.notion.com/v1/pages/${taskId}`);
     assert.equal(requests[0].body.properties.Status.select.name, "Done");
+    assert.equal(requests[0].body.properties["Progress %"].number, 1);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -368,6 +374,8 @@ test("creates a new roadmap ticket with its selected epic", async () => {
       taskId,
     );
     assert.equal(notionBody.properties.Status.select.name, "Todo");
+    assert.equal(notionBody.properties["Progress %"].number, 0);
+    assert.equal(payload.task.progress, 0);
     assert.equal(
       notionBody.properties.Notes.rich_text[0].text.content,
       "1. Inventariseren\n2. Refactoren",
@@ -420,6 +428,7 @@ test("updates all editable roadmap ticket fields", async () => {
         taskType: "Feature",
         priority: "Critical",
         estimate: 5,
+        progress: 0.65,
         nextAction: "Review inplannen",
         notes: "1. Review voorbereiden\n2. Feedback verwerken",
         ownerId: taskId,
@@ -439,6 +448,7 @@ test("updates all editable roadmap ticket fields", async () => {
     );
     assert.equal(notionBody.properties.Priority.select.name, "Critical");
     assert.equal(notionBody.properties["Estimate hours"].number, 5);
+    assert.equal(notionBody.properties["Progress %"].number, 0.65);
     assert.equal(
       notionBody.properties.Notes.rich_text[0].text.content,
       "1. Review voorbereiden\n2. Feedback verwerken",

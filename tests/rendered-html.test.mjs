@@ -39,6 +39,8 @@ test("server-renders My Powerselect Headquarters", async () => {
   assert.match(html, /Start/);
   assert.match(html, /Pauze/);
   assert.match(html, /Klaar/);
+  assert.match(html, /Voortgang/);
+  assert.match(html, /aria-label="Voortgang in procenten"/i);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/i);
 });
 

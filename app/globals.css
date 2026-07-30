@@ -45,6 +45,73 @@ button {
     var(--canvas);
 }
 
+.confetti-layer {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  animation: confetti-layer-life 2.75s both;
+}
+
+.confetti-piece {
+  position: absolute;
+  top: 100%;
+  left: var(--confetti-start);
+  width: 9px;
+  height: 15px;
+  border-radius: 2px;
+  background: var(--confetti-color);
+  opacity: 0;
+  animation: confetti-burst var(--confetti-duration) cubic-bezier(0.16, 0.74, 0.23, 1)
+    var(--confetti-delay) forwards;
+}
+
+.confetti-piece:nth-child(3n) {
+  width: 12px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.confetti-piece:nth-child(4n) {
+  width: 6px;
+  height: 18px;
+}
+
+@keyframes confetti-burst {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) rotate(0deg) scale(0.65);
+  }
+
+  8% {
+    opacity: 1;
+  }
+
+  46% {
+    opacity: 1;
+    transform: translate3d(var(--confetti-x), var(--confetti-peak), 0)
+      rotate(var(--confetti-rotation)) scale(1);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--confetti-x-end), 12vh, 0)
+      rotate(var(--confetti-rotation-end)) scale(0.9);
+  }
+}
+
+@keyframes confetti-layer-life {
+  from,
+  92% {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+  }
+}
+
 .topbar {
   height: 72px;
   display: grid;
@@ -898,7 +965,7 @@ button {
   text-align: center;
 }
 
-.timer-card span {
+.timer-card > span {
   display: block;
   color: #8b96a6;
   font-size: 8px;
@@ -918,6 +985,104 @@ button {
 .timer-card small {
   color: var(--muted);
   font-size: 8px;
+}
+
+.task-progress {
+  display: grid;
+  gap: 8px;
+  margin-top: 17px;
+  padding-top: 15px;
+  border-top: 1px solid var(--line);
+  text-align: left;
+}
+
+.task-progress-heading,
+.task-progress-value {
+  display: flex;
+  align-items: center;
+}
+
+.task-progress-heading {
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.task-progress-heading label {
+  color: #536176;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.025em;
+}
+
+.task-progress-value {
+  gap: 4px;
+  color: var(--navy);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.task-progress-value input {
+  width: 58px;
+  padding: 7px 6px;
+  border: 1px solid #ccd6e2;
+  border-radius: 8px;
+  background: #fff;
+  color: var(--navy);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 13px;
+  font-weight: 800;
+  text-align: right;
+  outline: none;
+}
+
+.task-progress-value input:focus {
+  border-color: #ff7a1a;
+  box-shadow: 0 0 0 3px rgba(255, 101, 0, 0.13);
+}
+
+.task-progress-value input:disabled {
+  background: #f1f4f7;
+  color: #68758a;
+}
+
+.task-progress-track {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: #e7ebf0;
+}
+
+.task-progress-track > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #ff6500, #ff9144);
+  transition: width 240ms ease;
+}
+
+.task-progress > button {
+  justify-self: end;
+  min-width: 76px;
+  padding: 7px 10px;
+  border: 1px solid #ff8b3d;
+  border-radius: 8px;
+  background: #fff7f0;
+  color: #b54a00;
+  font-size: 10px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.task-progress > button:hover:not(:disabled) {
+  background: #ff6500;
+  color: #fff;
+}
+
+.task-progress > button:disabled {
+  border-color: #d5dbe3;
+  background: #eef1f4;
+  color: #657286;
+  cursor: default;
 }
 
 .control-buttons {
@@ -1582,6 +1747,16 @@ button {
   color: var(--muted);
   font-size: 10px;
   font-weight: 750;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .confetti-layer {
+    display: none;
+  }
+
+  .task-progress-track > span {
+    transition: none;
+  }
 }
 
 .ticket-modal input,

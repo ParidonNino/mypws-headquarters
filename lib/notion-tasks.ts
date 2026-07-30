@@ -319,6 +319,9 @@ export async function getNotionTasksResponse(
           estimate: properties["Estimate hours"]?.number ?? 1,
           plannedHours: properties["Planned today hours"]?.number ?? null,
           loggedSeconds: loggedSeconds.get(page.id) ?? 0,
+          progress:
+            properties["Progress %"]?.number ??
+            (selectName(properties.Status) === "Done" ? 1 : 0),
           status: workStatus(selectName(properties.Status)),
           notionStatus: selectName(properties.Status),
           day: dayKey(workDate),
@@ -481,6 +484,7 @@ export async function createNotionTaskResponse(
       Status: { select: { name: "Todo" } },
       Priority: { select: { name: payload.priority } },
       "Estimate hours": { number: payload.estimate },
+      "Progress %": { number: 0 },
       "Next action": { rich_text: richText(nextAction) },
       Notes: { rich_text: richText(notes) },
     };
@@ -533,6 +537,7 @@ export async function createNotionTaskResponse(
         estimate: payload.estimate,
         plannedHours: null,
         loggedSeconds: 0,
+        progress: 0,
         status: "ready",
         notionStatus: "Todo",
         day: dayKey(workDate ?? undefined),
@@ -583,6 +588,7 @@ export async function updateNotionTaskResponse(
       taskType?: unknown;
       priority?: unknown;
       estimate?: unknown;
+      progress?: unknown;
       nextAction?: unknown;
       notes?: unknown;
       ownerId?: unknown;
@@ -656,6 +662,21 @@ export async function updateNotionTaskResponse(
         return Response.json({ error: "Ongeldige status" }, { status: 400 });
       }
       properties.Status = { select: { name: payload.status } };
+    }
+
+    if (payload.progress !== undefined) {
+      if (
+        typeof payload.progress !== "number" ||
+        !Number.isFinite(payload.progress) ||
+        payload.progress < 0 ||
+        payload.progress > 1
+      ) {
+        return Response.json(
+          { error: "Ongeldige voortgang" },
+          { status: 400 },
+        );
+      }
+      properties["Progress %"] = { number: payload.progress };
     }
 
     if (payload.nextAction !== undefined) {
@@ -966,6 +987,7 @@ export async function updateNotionWorkblockResponse(
     if (payload.action === "done") {
       const taskResponse = await updatePage(token, payload.taskId, {
         Status: { select: { name: "Done" } },
+        "Progress %": { number: 1 },
       });
       if (!taskResponse.ok) return notionError(taskResponse);
     }
