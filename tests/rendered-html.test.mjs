@@ -54,5 +54,6 @@ test("renders accessible actions for planning and opening tickets", async () => 
   assert.match(html, /aria-label="Vorige periode"/i);
   assert.match(html, /aria-label="Volgende periode"/i);
   assert.match(html, /Openen/);
+  assert.match(html, /Naar lijst/);
   assert.match(html, /Nieuwe taak/);
 });

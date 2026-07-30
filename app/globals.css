@@ -874,9 +874,14 @@ button {
   font-size: 8px;
 }
 
-.calendar-task-open {
-  width: 100%;
+.calendar-task-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
   margin-top: 8px;
+}
+
+.calendar-task-actions > button {
   padding: 5px 7px;
   border: 0;
   border-radius: 6px;
@@ -887,10 +892,18 @@ button {
   font-weight: 800;
 }
 
-.calendar-task-open:hover,
-.calendar-task-open:focus-visible {
+.calendar-task-actions > button:only-child {
+  grid-column: 1 / -1;
+}
+
+.calendar-task-actions > button:hover,
+.calendar-task-actions > button:focus-visible {
   background: #fff;
   outline: 2px solid color-mix(in srgb, var(--card-color) 35%, white);
+}
+
+.calendar-task-unplan {
+  color: #5d4c91 !important;
 }
 
 .status-pill {
@@ -1909,6 +1922,19 @@ button {
 .modal-footer button.primary {
   border-color: var(--blue);
   background: var(--blue);
+  color: #fff;
+}
+
+.modal-footer button.return-to-list {
+  border-color: #c9bfe8;
+  background: #f7f4ff;
+  color: #4f3f82;
+  font-weight: 750;
+}
+
+.modal-footer button.return-to-list:hover {
+  border-color: #5d4c91;
+  background: #5d4c91;
   color: #fff;
 }
 

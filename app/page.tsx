@@ -799,6 +799,61 @@ export default function Home() {
     }
   }
 
+  async function returnTaskToBacklog(task: Task) {
+    if ((!task.workDate && !task.day) || task.status === "done") {
+      return { ok: true };
+    }
+
+    const previous = {
+      day: task.day,
+      slot: task.slot,
+      workDate: task.workDate,
+    };
+    const taskId = task.id;
+
+    setTasks((current) =>
+      current.map((item) =>
+        String(item.id) === String(taskId)
+          ? {
+              ...item,
+              day: undefined,
+              slot: undefined,
+              workDate: null,
+            }
+          : item,
+      ),
+    );
+    selectTask(task);
+    setFilter("Alle epics");
+
+    if (notionState !== "connected" || typeof taskId !== "string") {
+      setFeedback("saved", "Taak teruggezet in de lijst");
+      return { ok: true };
+    }
+
+    setFeedback("saving", "Planning verwijderen…");
+    try {
+      await apiRequest("/api/notion/tasks", {
+        method: "PATCH",
+        body: JSON.stringify({ pageId: taskId, workDate: null }),
+      });
+      setFeedback("saved", "Taak teruggezet in de lijst");
+      return { ok: true };
+    } catch (error) {
+      setTasks((current) =>
+        current.map((item) =>
+          String(item.id) === String(taskId)
+            ? { ...item, ...previous }
+            : item,
+        ),
+      );
+      const message =
+        error instanceof Error ? error.message : "Planning verwijderen mislukt";
+      setFeedback("error", message);
+      return { ok: false, error: message };
+    }
+  }
+
   function setLocalStatus(
     taskId: number | string,
     status: WorkStatus,
@@ -1610,7 +1665,18 @@ export default function Home() {
       </section>
 
       <div className="workspace">
-        <aside className="task-sidebar">
+        <aside
+          className="task-sidebar"
+          onDragOver={(event) => event.preventDefault()}
+          onDrop={(event) => {
+            event.preventDefault();
+            const taskId = event.dataTransfer.getData("text/plain");
+            const task = tasks.find(
+              (item) => String(item.id) === String(taskId),
+            );
+            if (task) void returnTaskToBacklog(task);
+          }}
+        >
           <div className="panel-heading">
             <div>
               <p className="eyebrow">TAKEN</p>
@@ -1748,7 +1814,8 @@ export default function Home() {
           </div>
 
           <p className="drag-copy">
-            <Icon size="small">↗</Icon> Sleep een taak naar je agenda
+            <Icon size="small">↗</Icon> Sleep naar de agenda of terug naar deze
+            lijst
           </p>
         </aside>
 
@@ -1840,17 +1907,33 @@ export default function Home() {
                             {statusLabel[task.status]}
                           </span>
                         </div>
-                        <button
-                          type="button"
-                          className="calendar-task-open"
-                          draggable={false}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            openEditTicket(task);
-                          }}
-                        >
-                          Openen
-                        </button>
+                        <div className="calendar-task-actions">
+                          {task.status !== "done" &&
+                            task.taskType !== "Feature" && (
+                              <button
+                                type="button"
+                                className="calendar-task-unplan"
+                                draggable={false}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  void returnTaskToBacklog(task);
+                                }}
+                              >
+                                ← Naar lijst
+                              </button>
+                            )}
+                          <button
+                            type="button"
+                            className="calendar-task-open"
+                            draggable={false}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              openEditTicket(task);
+                            }}
+                          >
+                            Openen
+                          </button>
+                        </div>
                       </article>
                     ))}
 
@@ -2531,6 +2614,36 @@ export default function Home() {
                   </span>
                 </div>
                 <div>
+                  {editingTicketId &&
+                    selected.status !== "done" &&
+                    selected.taskType !== "Feature" &&
+                    Boolean(selected.workDate || selected.day) && (
+                      <button
+                        className="return-to-list"
+                        type="button"
+                        disabled={
+                          ticketSaveState === "saving" ||
+                          saveState === "saving"
+                        }
+                        onClick={async () => {
+                          setTicketSaveState("saving");
+                          setTicketSaveMessage("Planning verwijderen…");
+                          const result = await returnTaskToBacklog(selected);
+                          if (result.ok) {
+                            setTicketFormOpen(false);
+                            setTicketSaveState("idle");
+                            setTicketSaveMessage("");
+                          } else {
+                            setTicketSaveState("error");
+                            setTicketSaveMessage(
+                              result.error ?? "Planning verwijderen mislukt",
+                            );
+                          }
+                        }}
+                      >
+                        ← Terug naar lijst
+                      </button>
+                    )}
                   <button
                     type="button"
                     onClick={() => setTicketFormOpen(false)}
