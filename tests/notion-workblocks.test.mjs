@@ -114,6 +114,16 @@ test("adds completed Workblocks time to the roadmap task", async () => {
                 "Actual hours": { type: "number", number: 0.5 },
               },
             },
+            {
+              id: "5130cdd2-c742-4cc7-8417-37832fa90b49",
+              properties: {
+                "Roadmap task": {
+                  type: "relation",
+                  relation: [{ id: taskId }],
+                },
+                "Actual hours": { type: "number", number: -0.25 },
+              },
+            },
           ],
         });
 
@@ -125,7 +135,7 @@ test("adds completed Workblocks time to the roadmap task", async () => {
     );
     const payload = await response.json();
     assert.equal(response.status, 200);
-    assert.equal(payload.tasks[0].loggedSeconds, 1_800);
+    assert.equal(payload.tasks[0].loggedSeconds, 900);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -488,6 +498,90 @@ test("archives a deleted roadmap ticket in Notion", async () => {
       `https://api.notion.com/v1/pages/${taskId}`,
     );
     assert.deepEqual(notionBody, { archived: true });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("adjusts the start time of a running Workblock", async () => {
+  const originalFetch = globalThis.fetch;
+  let notionBody;
+  const adjustedStartedAt = new Date(Date.now() - 30 * 60_000).toISOString();
+  globalThis.fetch = async (_url, init) => {
+    notionBody = JSON.parse(init.body);
+    return Response.json({});
+  };
+
+  try {
+    const response = await updateNotionWorkblockResponse(
+      request({
+        action: "adjust-running",
+        taskId,
+        workblockId,
+        startedAt: adjustedStartedAt,
+      }),
+      "secret",
+      "workblocks",
+    );
+    const payload = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(payload.startedAt, adjustedStartedAt);
+    assert.equal(
+      notionBody.properties["Work start"].date.start,
+      adjustedStartedAt,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("records an auditable correction for previously logged time", async () => {
+  const originalFetch = globalThis.fetch;
+  let correctionBody;
+  globalThis.fetch = async (url, init) => {
+    if (String(url).includes("/data_sources/workblocks/query")) {
+      return Response.json({
+        results: [
+          {
+            id: workblockId,
+            properties: {
+              "Actual hours": { type: "number", number: 2 },
+            },
+          },
+        ],
+      });
+    }
+    correctionBody = JSON.parse(init.body);
+    return Response.json({ id: "5130cdd2-c742-4cc7-8417-37832fa90b49" });
+  };
+
+  try {
+    const response = await updateNotionWorkblockResponse(
+      request({
+        action: "adjust-total",
+        taskId,
+        taskTitle: "Database-schema refactor",
+        totalSeconds: 1_800,
+      }),
+      "secret",
+      "workblocks",
+    );
+    const payload = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(payload.totalSeconds, 1_800);
+    assert.equal(payload.correctionSeconds, -5_400);
+    assert.equal(correctionBody.parent.data_source_id, "workblocks");
+    assert.equal(
+      correctionBody.properties["Roadmap task"].relation[0].id,
+      taskId,
+    );
+    assert.equal(correctionBody.properties["Actual hours"].number, -1.5);
+    assert.equal(
+      correctionBody.properties.Werkblok.title[0].text.content,
+      "Database-schema refactor · tijdcorrectie",
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }

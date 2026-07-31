@@ -244,13 +244,16 @@ export async function getNotionTasksResponse(
             workblock.properties?.["Roadmap task"]?.relation?.[0]?.id;
           const actualHours =
             workblock.properties?.["Actual hours"]?.number ?? 0;
-          if (taskId && actualHours > 0) {
+          if (taskId && Number.isFinite(actualHours) && actualHours !== 0) {
             loggedSeconds.set(
               taskId,
               (loggedSeconds.get(taskId) ?? 0) +
                 Math.round(actualHours * 3_600),
             );
           }
+        }
+        for (const [taskId, seconds] of loggedSeconds) {
+          loggedSeconds.set(taskId, Math.max(0, seconds));
         }
       }
     } catch {
@@ -856,12 +859,15 @@ export async function updateNotionWorkblockResponse(
       startedAt?: unknown;
       plannedHours?: unknown;
       nextAction?: unknown;
+      totalSeconds?: unknown;
     };
 
     if (
       payload.action !== "start" &&
       payload.action !== "pause" &&
-      payload.action !== "done"
+      payload.action !== "done" &&
+      payload.action !== "adjust-running" &&
+      payload.action !== "adjust-total"
     ) {
       return Response.json({ error: "Ongeldige werkactie" }, { status: 400 });
     }
@@ -871,6 +877,121 @@ export async function updateNotionWorkblockResponse(
 
     const now = new Date();
     const nowIso = now.toISOString();
+
+    if (payload.action === "adjust-running") {
+      if (!validPageId(payload.workblockId)) {
+        return Response.json(
+          { error: "Ongeldig Notion-werkblok" },
+          { status: 400 },
+        );
+      }
+      if (
+        typeof payload.startedAt !== "string" ||
+        Number.isNaN(Date.parse(payload.startedAt))
+      ) {
+        return Response.json(
+          { error: "Ongeldige starttijd" },
+          { status: 400 },
+        );
+      }
+
+      const workblockResponse = await updatePage(
+        token,
+        payload.workblockId,
+        {
+          "Work start": { date: { start: payload.startedAt } },
+        },
+      );
+      if (!workblockResponse.ok) return notionError(workblockResponse);
+
+      return Response.json({
+        configured: true,
+        saved: true,
+        action: payload.action,
+        startedAt: payload.startedAt,
+      });
+    }
+
+    if (payload.action === "adjust-total") {
+      if (
+        typeof payload.totalSeconds !== "number" ||
+        !Number.isFinite(payload.totalSeconds) ||
+        payload.totalSeconds < 0 ||
+        payload.totalSeconds > 3_600_000
+      ) {
+        return Response.json(
+          { error: "Ongeldige geregistreerde tijd" },
+          { status: 400 },
+        );
+      }
+
+      const workblocksDataSourceId =
+        configuredWorkblocksDataSourceId || DEFAULT_WORKBLOCKS_DATA_SOURCE_ID;
+      const workblocksResult = await queryDataSource(
+        token,
+        workblocksDataSourceId,
+        {
+          filter: {
+            property: "Roadmap task",
+            relation: { contains: payload.taskId },
+          },
+        },
+      );
+      if (workblocksResult.response) {
+        return notionError(workblocksResult.response);
+      }
+
+      const currentSeconds = workblocksResult.results.reduce(
+        (total, workblock) => {
+          const actualHours =
+            workblock.properties?.["Actual hours"]?.number ?? 0;
+          return Number.isFinite(actualHours)
+            ? total + Math.round(actualHours * 3_600)
+            : total;
+        },
+        0,
+      );
+      const targetSeconds = Math.round(payload.totalSeconds);
+      const correctionSeconds = targetSeconds - currentSeconds;
+
+      if (Math.abs(correctionSeconds) >= 1) {
+        const taskTitle =
+          typeof payload.taskTitle === "string" && payload.taskTitle.trim()
+            ? payload.taskTitle.trim().slice(0, 140)
+            : "Powerselect taak";
+        const createResponse = await fetch("https://api.notion.com/v1/pages", {
+          method: "POST",
+          headers: notionHeaders(token),
+          body: JSON.stringify({
+            parent: {
+              type: "data_source_id",
+              data_source_id: workblocksDataSourceId,
+            },
+            properties: {
+              Werkblok: {
+                title: richText(taskTitle + " · tijdcorrectie"),
+              },
+              "Roadmap task": { relation: [{ id: payload.taskId }] },
+              "Work start": { date: { start: nowIso } },
+              "Work end": { date: { start: nowIso } },
+              "Actual hours": {
+                number: Number((correctionSeconds / 3_600).toFixed(6)),
+              },
+              Werkstatus: { select: { name: "Klaar" } },
+            },
+          }),
+        });
+        if (!createResponse.ok) return notionError(createResponse);
+      }
+
+      return Response.json({
+        configured: true,
+        saved: true,
+        action: payload.action,
+        totalSeconds: targetSeconds,
+        correctionSeconds,
+      });
+    }
 
     if (payload.action === "start") {
       const taskResponse = await updatePage(token, payload.taskId, {

@@ -83,6 +83,12 @@ type TicketDraft = {
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
+type TimeDraft = {
+  hours: string;
+  minutes: string;
+  seconds: string;
+};
+
 const emptyWeeklyPlan = (): WeeklyPlan => ({
   goals: [
     { id: crypto.randomUUID(), text: "", done: false },
@@ -247,6 +253,15 @@ function formatDuration(totalSeconds: number) {
   return [hours, minutes, seconds]
     .map((value) => String(value).padStart(2, "0"))
     .join(":");
+}
+
+function timeDraftForSeconds(totalSeconds: number): TimeDraft {
+  const safeSeconds = Math.max(0, Math.round(totalSeconds));
+  return {
+    hours: String(Math.floor(safeSeconds / 3_600)),
+    minutes: String(Math.floor((safeSeconds % 3_600) / 60)),
+    seconds: String(safeSeconds % 60),
+  };
 }
 
 function taskProgressPercent(task: Task) {
@@ -426,6 +441,11 @@ export default function Home() {
     "Database-tabellen nalopen en bepalen welke velden vóór de migratie opgeschoond moeten worden.",
   );
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [timeEditOpen, setTimeEditOpen] = useState(false);
+  const [timeDraft, setTimeDraft] = useState<TimeDraft>(() =>
+    timeDraftForSeconds(0),
+  );
+  const [timeEditMessage, setTimeEditMessage] = useState("");
   const [activeSession, setActiveSession] = useState<ActiveSession | null>(null);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [saveMessage, setSaveMessage] = useState("");
@@ -746,6 +766,8 @@ export default function Home() {
 
   function selectTask(task: Task) {
     setSelectedId(task.id);
+    setTimeEditOpen(false);
+    setTimeEditMessage("");
     setNote(task.nextAction ?? "");
     setProgressInput(String(taskProgressPercent(task)));
     setElapsedSeconds(
@@ -926,6 +948,131 @@ export default function Home() {
         "error",
         error instanceof Error ? error.message : "Voortgang opslaan mislukt",
       );
+    }
+  }
+
+  function openTimeEditor() {
+    setTimeDraft(timeDraftForSeconds(elapsedSeconds));
+    setTimeEditMessage("");
+    setTimeEditOpen(true);
+  }
+
+  async function saveTimeAdjustment(
+    event: React.FormEvent<HTMLFormElement>,
+  ) {
+    event.preventDefault();
+    if (saveState === "saving" || selected.id === "") return;
+
+    const hours = Number(timeDraft.hours);
+    const minutes = Number(timeDraft.minutes);
+    const seconds = Number(timeDraft.seconds);
+    if (
+      !Number.isInteger(hours) ||
+      !Number.isInteger(minutes) ||
+      !Number.isInteger(seconds) ||
+      hours < 0 ||
+      hours > 1_000 ||
+      minutes < 0 ||
+      minutes > 59 ||
+      seconds < 0 ||
+      seconds > 59
+    ) {
+      setTimeEditMessage("Vul een geldige tijd in");
+      return;
+    }
+
+    const totalSeconds = hours * 3_600 + minutes * 60 + seconds;
+    if (totalSeconds > 3_600_000) {
+      setTimeEditMessage("De tijd mag maximaal 1.000 uur zijn");
+      return;
+    }
+
+    const runningSession =
+      activeSession &&
+      activeSession.taskId === String(selected.id) &&
+      selected.status === "running"
+        ? activeSession
+        : null;
+
+    if (runningSession) {
+      const completedSeconds = selected.loggedSeconds ?? 0;
+      if (totalSeconds < completedSeconds) {
+        setTimeEditMessage(
+          "Deze taak heeft al " +
+            formatDuration(completedSeconds) +
+            " opgeslagen tijd",
+        );
+        return;
+      }
+
+      const adjustedStartedAt = new Date(
+        Date.now() - (totalSeconds - completedSeconds) * 1_000,
+      ).toISOString();
+      setFeedback("saving", "Lopende tijd aanpassen…");
+      try {
+        if (
+          notionState === "connected" &&
+          typeof selected.id === "string" &&
+          runningSession.workblockId
+        ) {
+          await apiRequest("/api/notion/workblocks", {
+            method: "POST",
+            body: JSON.stringify({
+              action: "adjust-running",
+              taskId: selected.id,
+              workblockId: runningSession.workblockId,
+              startedAt: adjustedStartedAt,
+            }),
+          });
+        }
+
+        rememberSession({
+          ...runningSession,
+          startedAt: adjustedStartedAt,
+        });
+        setElapsedSeconds(totalSeconds);
+        setTimeEditOpen(false);
+        setTimeEditMessage("");
+        setFeedback("saved", "Lopende tijd aangepast");
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Tijd aanpassen mislukt";
+        setTimeEditMessage(message);
+        setFeedback("error", message);
+      }
+      return;
+    }
+
+    setFeedback("saving", "Geregistreerde tijd aanpassen…");
+    try {
+      if (notionState === "connected" && typeof selected.id === "string") {
+        await apiRequest("/api/notion/workblocks", {
+          method: "POST",
+          body: JSON.stringify({
+            action: "adjust-total",
+            taskId: selected.id,
+            taskTitle: selected.title,
+            totalSeconds,
+          }),
+        });
+      }
+
+      setTasks((current) =>
+        current.map((task) =>
+          String(task.id) === String(selected.id)
+            ? { ...task, loggedSeconds: totalSeconds }
+            : task,
+        ),
+      );
+      setElapsedSeconds(totalSeconds);
+      setTimeEditOpen(false);
+      setTimeEditMessage("");
+      setFeedback("saved", "Geregistreerde tijd aangepast");
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Tijd aanpassen mislukt";
+      setTimeEditMessage(message);
+      setFeedback("error", message);
     }
   }
 
@@ -1981,6 +2128,93 @@ export default function Home() {
             <span>TIJD AAN DEZE TAAK</span>
             <strong>{formatDuration(elapsedSeconds)}</strong>
             <small>van {selected.estimate}:00:00 gepland</small>
+
+            <button
+              type="button"
+              className="edit-time-button"
+              onClick={() =>
+                timeEditOpen ? setTimeEditOpen(false) : openTimeEditor()
+              }
+              disabled={saveState === "saving" || selected.id === ""}
+            >
+              {timeEditOpen ? "Sluiten" : "Tijd aanpassen"}
+            </button>
+
+            {timeEditOpen && (
+              <form className="time-editor" onSubmit={saveTimeAdjustment}>
+                <div className="time-editor-fields">
+                  <label>
+                    <span>Uur</span>
+                    <input
+                      aria-label="Uren"
+                      type="number"
+                      min="0"
+                      max="1000"
+                      step="1"
+                      value={timeDraft.hours}
+                      onChange={(event) =>
+                        setTimeDraft((current) => ({
+                          ...current,
+                          hours: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                  <b>:</b>
+                  <label>
+                    <span>Min</span>
+                    <input
+                      aria-label="Minuten"
+                      type="number"
+                      min="0"
+                      max="59"
+                      step="1"
+                      value={timeDraft.minutes}
+                      onChange={(event) =>
+                        setTimeDraft((current) => ({
+                          ...current,
+                          minutes: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                  <b>:</b>
+                  <label>
+                    <span>Sec</span>
+                    <input
+                      aria-label="Seconden"
+                      type="number"
+                      min="0"
+                      max="59"
+                      step="1"
+                      value={timeDraft.seconds}
+                      onChange={(event) =>
+                        setTimeDraft((current) => ({
+                          ...current,
+                          seconds: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                </div>
+                {timeEditMessage && (
+                  <p className="time-editor-message" role="alert">
+                    {timeEditMessage}
+                  </p>
+                )}
+                <div className="time-editor-actions">
+                  <button
+                    type="button"
+                    onClick={() => setTimeEditOpen(false)}
+                  >
+                    Annuleren
+                  </button>
+                  <button type="submit" disabled={saveState === "saving"}>
+                    Tijd opslaan
+                  </button>
+                </div>
+              </form>
+            )}
 
             <form
               className="task-progress"
