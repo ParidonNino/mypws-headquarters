@@ -363,8 +363,6 @@ function weekDetails(offset: number) {
     key: `${thursday.getFullYear()}-W${String(week).padStart(2, "0")}`,
     label: `Week ${week}`,
     range: `${format.format(monday)} – ${format.format(sunday)}`,
-    startKey: localDateKey(monday),
-    endKey: localDateKey(sunday),
     workdays,
   };
 }
@@ -386,14 +384,6 @@ function taskDateKey(task: Task) {
       (task.day === "yesterday" ? -1 : task.day === "tomorrow" ? 1 : 0),
   );
   return localDateKey(date);
-}
-
-function weekTicketDate(value: string) {
-  return new Intl.DateTimeFormat("nl-NL", {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-  }).format(new Date(`${value}T12:00:00`));
 }
 
 function parseStoredSession(value: string): ActiveSession | null {
@@ -495,9 +485,6 @@ export default function Home() {
   const [ticketSaveState, setTicketSaveState] =
     useState<SaveState>("idle");
   const [ticketSaveMessage, setTicketSaveMessage] = useState("");
-  const [weekTicketSaveState, setWeekTicketSaveState] =
-    useState<SaveState>("idle");
-  const [weekTicketSaveMessage, setWeekTicketSaveMessage] = useState("");
   const [ticketDeleteArmed, setTicketDeleteArmed] = useState(false);
   const [editingTicketId, setEditingTicketId] = useState<
     number | string | null
@@ -556,23 +543,20 @@ export default function Home() {
     [filteredTasks],
   );
   const selectedWeek = useMemo(() => weekDetails(weekOffset), [weekOffset]);
-  const weeklyTickets = useMemo(
-    () =>
-      tasks
+  const weeklyTickets = useMemo(() => {
+    const workdayKeys = new Set(
+      selectedWeek.workdays.map((day) => day.key),
+    );
+    return tasks
         .filter((task) => {
           if (task.taskType === "Feature") return false;
           const dateKey = taskDateKey(task);
-          if (!dateKey) return false;
-          return (
-            dateKey >= selectedWeek.startKey &&
-            dateKey <= selectedWeek.endKey
-          );
+          return Boolean(dateKey && workdayKeys.has(dateKey));
         })
         .sort((a, b) =>
           String(taskDateKey(a)).localeCompare(String(taskDateKey(b))),
-        ),
-    [selectedWeek.endKey, selectedWeek.startKey, tasks],
-  );
+        );
+  }, [selectedWeek.workdays, tasks]);
   const availableWeekSubtasks = useMemo(() => {
     const activeIds = new Set(activeEpics.map((epic) => epic.id));
     const priority = { Critical: 0, High: 1, Medium: 2, Low: 3 };
@@ -790,8 +774,6 @@ export default function Home() {
     }
     queueMicrotask(() => {
       setWeeklyPlan(nextPlan);
-      setWeekTicketSaveState("idle");
-      setWeekTicketSaveMessage("");
     });
   }, [selectedWeek.key]);
 
@@ -912,51 +894,6 @@ export default function Home() {
         error: error instanceof Error ? error.message : "Opslaan mislukt",
       };
     }
-  }
-
-  async function planTicketForWeek(
-    event: React.FormEvent<HTMLFormElement>,
-  ) {
-    event.preventDefault();
-    if (weekTicketSaveState === "saving") return;
-
-    const form = event.currentTarget;
-    const data = new FormData(form);
-    const ticketId = String(data.get("ticketId") ?? "");
-    const dateKey = String(data.get("dateKey") ?? "");
-    const day = selectedWeek.workdays.find((item) => item.key === dateKey);
-    const task = tasks.find((item) => String(item.id) === ticketId);
-
-    if (!task || !day) {
-      setWeekTicketSaveState("error");
-      setWeekTicketSaveMessage("Kies een subtask en een werkdag");
-      return;
-    }
-
-    setWeekTicketSaveState("saving");
-    setWeekTicketSaveMessage("Ticket inplannen…");
-    const result = await moveTask(task.id, day);
-    if (result.ok) {
-      form.reset();
-      setWeekTicketSaveState("saved");
-      setWeekTicketSaveMessage(`${task.title} staat op ${day.label}`);
-    } else {
-      setWeekTicketSaveState("error");
-      setWeekTicketSaveMessage(result.error ?? "Inplannen mislukt");
-    }
-  }
-
-  async function removeTicketFromWeek(task: Task) {
-    if (weekTicketSaveState === "saving") return;
-    setWeekTicketSaveState("saving");
-    setWeekTicketSaveMessage("Planning verwijderen…");
-    const result = await returnTaskToBacklog(task);
-    setWeekTicketSaveState(result.ok ? "saved" : "error");
-    setWeekTicketSaveMessage(
-      result.ok
-        ? `${task.title} is uit deze week gehaald`
-        : (result.error ?? "Planning verwijderen mislukt"),
-    );
   }
 
   async function returnTaskToBacklog(task: Task) {
@@ -2596,7 +2533,7 @@ export default function Home() {
             <div>
               <p className="eyebrow">MIJN WEEK</p>
               <h1>{selectedWeek.label}</h1>
-              <p>{selectedWeek.range} · bepaal je uitkomsten, reflecteer daarna</p>
+              <p>{selectedWeek.range} · plan maandag je focus voor vijf werkdagen</p>
             </div>
             <div className="week-controls">
               <button
@@ -2615,225 +2552,322 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="week-layout">
-            <aside className="week-overview">
-              <p className="eyebrow">WEEKOVERZICHT</p>
-              <strong>
-                {weeklyPlan.goals.filter((goal) => goal.done).length} van{" "}
-                {weeklyPlan.goals.length} doelen afgerond
-              </strong>
-              <div className="week-progress">
-                <span
-                  style={{
-                    width: `${
-                      weeklyPlan.goals.length
-                        ? (weeklyPlan.goals.filter((goal) => goal.done)
-                            .length /
-                            weeklyPlan.goals.length) *
-                          100
-                        : 0
-                    }%`,
-                  }}
-                />
-              </div>
-              <p>
-                Houd het bij maximaal drie belangrijke uitkomsten en plan de
-                subtasks die deze week aandacht krijgen.
-              </p>
-              <strong className="week-ticket-summary">
-                {weeklyTickets.length} tickets · {weeklyTicketHours} uur
-              </strong>
-              <small>Automatisch bewaard in deze planner</small>
-            </aside>
-
-            <div className="week-goals-panel">
-              <div className="week-panel-heading">
-                <div>
-                  <p className="eyebrow">WEEKDOELEN</p>
-                  <h2>Wat moet vrijdag af zijn?</h2>
+          <div className="week-planner-shell">
+            <aside className="week-goals-sidebar">
+              <div className="week-overview">
+                <p className="eyebrow">WEEKOVERZICHT</p>
+                <strong>
+                  {weeklyPlan.goals.filter((goal) => goal.done).length} van{" "}
+                  {weeklyPlan.goals.length} doelen afgerond
+                </strong>
+                <div className="week-progress">
+                  <span
+                    style={{
+                      width: `${
+                        weeklyPlan.goals.length
+                          ? (weeklyPlan.goals.filter((goal) => goal.done)
+                              .length /
+                              weeklyPlan.goals.length) *
+                            100
+                          : 0
+                      }%`,
+                    }}
+                  />
                 </div>
-                <button
-                  onClick={() =>
-                    updateWeeklyPlan((current) => ({
-                      ...current,
-                      goals: [
-                        ...current.goals,
-                        {
-                          id: crypto.randomUUID(),
-                          text: "",
-                          done: false,
-                        },
-                      ],
-                    }))
-                  }
-                >
-                  + Doel
-                </button>
+                <div className="week-overview-metrics">
+                  <span>
+                    <strong>{weeklyTickets.length}</strong> tickets
+                  </span>
+                  <span>
+                    <strong>{weeklyTicketHours}</strong> uur gepland
+                  </span>
+                </div>
+                <small>Automatisch bewaard</small>
               </div>
 
-              <div className="week-goal-list">
-                {weeklyPlan.goals.map((goal, index) => (
-                  <div className="week-goal" key={goal.id}>
-                    <label>
-                      <input
-                        type="checkbox"
-                        checked={goal.done}
+              <div className="week-goals-panel">
+                <div className="week-panel-heading">
+                  <div>
+                    <p className="eyebrow">WEEKDOELEN</p>
+                    <h2>Vrijdag klaar</h2>
+                  </div>
+                  <button
+                    aria-label="Weekdoel toevoegen"
+                    onClick={() =>
+                      updateWeeklyPlan((current) => ({
+                        ...current,
+                        goals: [
+                          ...current.goals,
+                          {
+                            id: crypto.randomUUID(),
+                            text: "",
+                            done: false,
+                          },
+                        ],
+                      }))
+                    }
+                  >
+                    + Doel
+                  </button>
+                </div>
+
+                <div className="week-goal-list">
+                  {weeklyPlan.goals.map((goal, index) => (
+                    <div className="week-goal" key={goal.id}>
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={goal.done}
+                          onChange={(event) =>
+                            updateWeeklyPlan((current) => ({
+                              ...current,
+                              goals: current.goals.map((item) =>
+                                item.id === goal.id
+                                  ? { ...item, done: event.target.checked }
+                                  : item,
+                              ),
+                            }))
+                          }
+                        />
+                        <span>{String(index + 1).padStart(2, "0")}</span>
+                      </label>
+                      <textarea
+                        aria-label={`Weekdoel ${index + 1}`}
+                        value={goal.text}
+                        placeholder="Belangrijkste uitkomst…"
                         onChange={(event) =>
                           updateWeeklyPlan((current) => ({
                             ...current,
                             goals: current.goals.map((item) =>
                               item.id === goal.id
-                                ? { ...item, done: event.target.checked }
+                                ? { ...item, text: event.target.value }
                                 : item,
                             ),
                           }))
                         }
                       />
-                      <span>{String(index + 1).padStart(2, "0")}</span>
-                    </label>
-                    <textarea
-                      value={goal.text}
-                      placeholder="Bijvoorbeeld: database-schema refactor afgerond en gereviewd"
-                      onChange={(event) =>
-                        updateWeeklyPlan((current) => ({
-                          ...current,
-                          goals: current.goals.map((item) =>
-                            item.id === goal.id
-                              ? { ...item, text: event.target.value }
-                              : item,
-                          ),
-                        }))
-                      }
-                    />
-                    <button
-                      aria-label="Weekdoel verwijderen"
-                      onClick={() =>
-                        updateWeeklyPlan((current) => ({
-                          ...current,
-                          goals: current.goals.filter(
-                            (item) => item.id !== goal.id,
-                          ),
-                        }))
-                      }
-                    >
-                      ×
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="week-tickets-panel">
-              <div className="week-panel-heading">
-                <div>
-                  <p className="eyebrow">SUBTASKS</p>
-                  <h2>Tickets deze week</h2>
-                </div>
-                <span>{weeklyTicketHours} uur gepland</span>
-              </div>
-
-              <form
-                className="week-ticket-form"
-                key={selectedWeek.key}
-                onSubmit={planTicketForWeek}
-              >
-                <label>
-                  Open subtask
-                  <select
-                    name="ticketId"
-                    defaultValue=""
-                    disabled={availableWeekSubtasks.length === 0}
-                    required
-                  >
-                    <option value="" disabled>
-                      {availableWeekSubtasks.length
-                        ? "Kies een ticket"
-                        : "Geen open subtasks beschikbaar"}
-                    </option>
-                    {availableWeekSubtasks.map((task) => (
-                      <option key={task.id} value={String(task.id)}>
-                        {task.title} · {task.epic}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  Werkdag
-                  <select
-                    name="dateKey"
-                    defaultValue={
-                      selectedWeek.workdays.find((day) => day.isToday)?.key ??
-                      selectedWeek.workdays[0]?.key
-                    }
-                  >
-                    {selectedWeek.workdays.map((day) => (
-                      <option key={day.key} value={day.key}>
-                        {day.label} · {day.date}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <button
-                  type="submit"
-                  disabled={
-                    availableWeekSubtasks.length === 0 ||
-                    weekTicketSaveState === "saving"
-                  }
-                >
-                  + Inplannen
-                </button>
-              </form>
-
-              <div className="week-ticket-list">
-                {weeklyTickets.map((task) => (
-                  <article key={task.id} className={task.status}>
-                    <time dateTime={taskDateKey(task) ?? undefined}>
-                      {weekTicketDate(taskDateKey(task) as string)}
-                    </time>
-                    <div>
-                      <strong>{task.title}</strong>
-                      <span>
-                        {task.epic} · {task.plannedHours ?? task.estimate} uur
-                      </span>
+                      <button
+                        aria-label="Weekdoel verwijderen"
+                        onClick={() =>
+                          updateWeeklyPlan((current) => ({
+                            ...current,
+                            goals: current.goals.filter(
+                              (item) => item.id !== goal.id,
+                            ),
+                          }))
+                        }
+                      >
+                        ×
+                      </button>
                     </div>
-                    <div className="week-ticket-actions">
-                      <button type="button" onClick={() => openEditTicket(task)}>
+                  ))}
+                </div>
+              </div>
+            </aside>
+
+            <section className="week-board">
+              <div
+                className="week-backlog-strip"
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  const taskId = event.dataTransfer.getData("text/plain");
+                  const task = tasks.find(
+                    (item) => String(item.id) === String(taskId),
+                  );
+                  if (task) void returnTaskToBacklog(task);
+                }}
+              >
+                <div className="week-backlog-heading">
+                  <div>
+                    <p className="eyebrow">MAANDAGSTART</p>
+                    <h2>Open subtasks</h2>
+                  </div>
+                  <span>{availableWeekSubtasks.length} beschikbaar</span>
+                  <button
+                    type="button"
+                    aria-label="Taak toevoegen"
+                    onClick={() => openTicketForm()}
+                  >
+                    + Ticket
+                  </button>
+                </div>
+
+                <div className="week-backlog-list">
+                  {availableWeekSubtasks.map((task) => (
+                    <article
+                      className="week-backlog-card"
+                      draggable
+                      key={task.id}
+                      onDragStart={(event) =>
+                        event.dataTransfer.setData(
+                          "text/plain",
+                          String(task.id),
+                        )
+                      }
+                      onClick={() => selectTask(task)}
+                      onDoubleClick={() => openEditTicket(task)}
+                      title="Sleep deze subtask naar een werkdag"
+                    >
+                      <span className={`task-accent ${task.accent}`} />
+                      <div>
+                        <strong>{task.title}</strong>
+                        <span>{task.epic}</span>
+                      </div>
+                      <span className="estimate">{task.estimate}u</span>
+                      <button
+                        type="button"
+                        draggable={false}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          openEditTicket(task);
+                        }}
+                      >
                         Openen
                       </button>
-                      {task.status !== "done" && (
-                        <button
-                          type="button"
-                          onClick={() => void removeTicketFromWeek(task)}
-                          disabled={weekTicketSaveState === "saving"}
-                        >
-                          Uit week
-                        </button>
-                      )}
+                    </article>
+                  ))}
+                  {availableWeekSubtasks.length === 0 && (
+                    <div className="week-backlog-empty">
+                      Alle open subtasks zijn ingepland.
                     </div>
-                  </article>
-                ))}
-                {weeklyTickets.length === 0 && (
-                  <div className="week-ticket-empty">
-                    <strong>Nog geen tickets ingepland</strong>
-                    <span>Kies hierboven een open subtask en een werkdag.</span>
-                  </div>
-                )}
+                  )}
+                </div>
+              </div>
+
+              <div className="week-days-grid">
+                {selectedWeek.workdays.map((day) => {
+                  const dayTasks = weeklyTickets.filter(
+                    (task) => taskDateKey(task) === day.key,
+                  );
+                  const plannedHours = dayTasks.reduce(
+                    (total, task) =>
+                      total + (task.plannedHours ?? task.estimate),
+                    0,
+                  );
+
+                  return (
+                    <section
+                      className={`day-column ${day.isToday ? "is-today" : ""}`}
+                      key={day.key}
+                      onDragOver={(event) => event.preventDefault()}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        void moveTask(
+                          event.dataTransfer.getData("text/plain"),
+                          day,
+                        );
+                      }}
+                    >
+                      <header>
+                        <div>
+                          <span>{day.label}</span>
+                          {day.isToday && <i>NU</i>}
+                          <strong>{day.date}</strong>
+                        </div>
+                        <small>{plannedHours}u</small>
+                      </header>
+
+                      <div className="day-body">
+                        {dayTasks.map((task) => (
+                          <article
+                            key={task.id}
+                            className={`calendar-task ${task.accent} ${task.status}`}
+                            draggable
+                            onDragStart={(event) =>
+                              event.dataTransfer.setData(
+                                "text/plain",
+                                String(task.id),
+                              )
+                            }
+                            onClick={() => selectTask(task)}
+                            onDoubleClick={() => openEditTicket(task)}
+                            data-selected={selected.id === task.id}
+                            title="Sleep naar een andere dag of open het ticket"
+                          >
+                            <div className="calendar-task-top">
+                              <span className="task-time">
+                                {task.slot ?? "09:00"}
+                              </span>
+                              <ProgressRing task={task} />
+                            </div>
+                            <strong>{task.title}</strong>
+                            <span>{task.epic}</span>
+                            <div className="calendar-task-footer">
+                              <span>{task.plannedHours ?? task.estimate} uur</span>
+                              <span className={`status-pill ${task.status}`}>
+                                {task.status === "running" && "● "}
+                                {task.status === "done" && "✓ "}
+                                {statusLabel[task.status]}
+                              </span>
+                            </div>
+                            <div className="calendar-task-actions">
+                              {task.status !== "done" && (
+                                <button
+                                  type="button"
+                                  className="calendar-task-unplan"
+                                  draggable={false}
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    void returnTaskToBacklog(task);
+                                  }}
+                                >
+                                  Naar lijst
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                draggable={false}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  openEditTicket(task);
+                                }}
+                              >
+                                Openen
+                              </button>
+                            </div>
+                          </article>
+                        ))}
+
+                        {dayTasks.length === 0 && (
+                          <div className="empty-dropzone">
+                            <span>+</span>
+                            <strong>Sleep hier een subtask</strong>
+                            <small>Plan je focus voor {day.label}</small>
+                          </div>
+                        )}
+
+                        <button
+                          className="add-block"
+                          onClick={() => openTicketForm("custom", day.key)}
+                        >
+                          + Nieuwe taak
+                        </button>
+                      </div>
+                    </section>
+                  );
+                })}
               </div>
 
               <span
-                className={`save-feedback ${weekTicketSaveState}`}
+                className={`save-feedback week-board-feedback ${saveState}`}
                 aria-live="polite"
               >
-                {weekTicketSaveMessage}
+                {saveMessage}
               </span>
-            </div>
+            </section>
+          </div>
 
-            <div className="reflection-panel">
+          <div className="reflection-panel week-reflection-panel">
+            <div className="week-reflection-heading">
               <p className="eyebrow">VRIJDAGREFLECTIE</p>
-              <h2>Wat ging goed en wat heb je geleerd?</h2>
+              <h2>Sluit de week bewust af</h2>
+            </div>
+            <label>
+              Wat ging goed en wat heb je geleerd?
               <textarea
                 value={weeklyPlan.reflection}
-                placeholder="Resultaten, inzichten, blokkades en wat je anders wilt doen…"
+                placeholder="Resultaten, inzichten en blokkades…"
                 onChange={(event) =>
                   updateWeeklyPlan((current) => ({
                     ...current,
@@ -2841,9 +2875,10 @@ export default function Home() {
                   }))
                 }
               />
-              <label htmlFor="carry-forward">Meenemen naar volgende week</label>
+            </label>
+            <label>
+              Meenemen naar volgende week
               <textarea
-                id="carry-forward"
                 className="compact"
                 value={weeklyPlan.carryForward}
                 placeholder="Wat blijft open of verdient volgende week aandacht?"
@@ -2854,7 +2889,7 @@ export default function Home() {
                   }))
                 }
               />
-            </div>
+            </label>
           </div>
         </section>
       )}

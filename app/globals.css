@@ -1703,16 +1703,16 @@ button {
   font-weight: 700;
 }
 
-.week-layout {
+.week-planner-shell {
   display: grid;
-  grid-template-columns: 230px minmax(420px, 1.2fr) minmax(340px, 0.9fr);
+  grid-template-columns: 245px minmax(0, 1fr);
   gap: 15px;
   align-items: start;
 }
 
 .week-overview,
 .week-goals-panel,
-.week-tickets-panel,
+.week-board,
 .reflection-panel {
   border: 1px solid var(--line);
   border-radius: 14px;
@@ -1721,7 +1721,7 @@ button {
 }
 
 .week-overview {
-  padding: 19px;
+  padding: 17px;
   background: var(--navy);
   color: #fff;
 }
@@ -1733,25 +1733,14 @@ button {
 }
 
 .week-overview .eyebrow,
-.week-overview > p,
 .week-overview > small {
   color: #acc0d4;
 }
 
-.week-overview > p {
-  margin: 17px 0 20px;
-  font-size: 10px;
-  line-height: 1.6;
-}
-
 .week-overview > small {
+  display: block;
+  margin-top: 12px;
   font-size: 8px;
-}
-
-.week-overview .week-ticket-summary {
-  margin-bottom: 7px;
-  color: #dce9f5;
-  font-size: 11px;
 }
 
 .week-progress {
@@ -1769,14 +1758,35 @@ button {
   background: #77a2ff;
 }
 
-.week-goals-panel,
-.week-tickets-panel,
-.reflection-panel {
-  padding: 21px;
+.week-overview-metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 14px;
 }
 
-.reflection-panel {
-  grid-column: 2 / -1;
+.week-overview-metrics > span {
+  display: grid;
+  gap: 2px;
+  padding: 9px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.07);
+  color: #acc0d4;
+  font-size: 8px;
+}
+
+.week-overview-metrics strong {
+  color: #fff;
+  font-size: 14px;
+}
+
+.week-goals-sidebar {
+  display: grid;
+  gap: 12px;
+}
+
+.week-goals-panel {
+  padding: 16px;
 }
 
 .week-panel-heading {
@@ -1812,7 +1822,7 @@ button {
 
 .week-goal {
   display: grid;
-  grid-template-columns: 42px 1fr 28px;
+  grid-template-columns: 34px 1fr 25px;
   align-items: stretch;
   overflow: hidden;
   border: 1px solid var(--line);
@@ -1836,13 +1846,13 @@ button {
 }
 
 .week-goal textarea {
-  min-height: 66px;
+  min-height: 56px;
   resize: vertical;
   border: 0;
-  padding: 12px;
+  padding: 10px;
   color: var(--ink);
   font-family: inherit;
-  font-size: 11px;
+  font-size: 10px;
   line-height: 1.45;
   outline: none;
 }
@@ -1856,9 +1866,177 @@ button {
   font-size: 16px;
 }
 
+.week-board {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.week-backlog-strip {
+  border-bottom: 1px solid var(--line);
+  background: #fbfcfe;
+  padding: 14px;
+}
+
+.week-backlog-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.week-backlog-heading > div {
+  margin-right: auto;
+}
+
+.week-backlog-heading h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.week-backlog-heading > span {
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 750;
+}
+
+.week-backlog-heading > button {
+  border: 1px solid #b8caf0;
+  border-radius: 7px;
+  background: var(--blue-soft);
+  padding: 7px 9px;
+  color: var(--blue);
+  cursor: pointer;
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.week-backlog-list {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 3px;
+  scrollbar-width: thin;
+}
+
+.week-backlog-card {
+  display: grid;
+  grid-template-columns: 4px minmax(145px, 1fr) auto;
+  grid-template-rows: auto auto;
+  flex: 0 0 225px;
+  gap: 4px 8px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fff;
+  padding: 9px 8px 8px 6px;
+  cursor: grab;
+}
+
+.week-backlog-card:hover {
+  border-color: #9bb8f5;
+  box-shadow: 0 5px 14px rgba(31, 74, 135, 0.08);
+}
+
+.week-backlog-card > .task-accent {
+  grid-row: 1 / -1;
+  align-self: stretch;
+  height: auto;
+}
+
+.week-backlog-card > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.week-backlog-card > div strong,
+.week-backlog-card > div span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.week-backlog-card > div strong {
+  font-size: 9px;
+}
+
+.week-backlog-card > div span {
+  color: var(--muted);
+  font-size: 7px;
+}
+
+.week-backlog-card > .estimate {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+.week-backlog-card > button {
+  grid-column: 2 / -1;
+  justify-self: end;
+  border: 0;
+  background: transparent;
+  color: var(--blue);
+  cursor: pointer;
+  font-size: 7px;
+  font-weight: 800;
+}
+
+.week-backlog-empty {
+  display: grid;
+  min-height: 54px;
+  flex: 1;
+  place-items: center;
+  border: 1px dashed #cbd5e2;
+  border-radius: 9px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.week-days-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.week-days-grid .day-body {
+  min-height: 455px;
+  padding: 10px 7px;
+}
+
+.week-days-grid .day-column > header {
+  height: 61px;
+  padding: 0 9px;
+}
+
+.week-days-grid .calendar-task {
+  padding: 9px;
+}
+
+.week-days-grid .calendar-task > strong {
+  font-size: 10px;
+}
+
+.week-days-grid .calendar-task-footer {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.week-board-feedback {
+  position: absolute;
+  right: 12px;
+  bottom: 6px;
+  z-index: 2;
+  padding: 4px 7px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.94);
+  font-size: 8px;
+}
+
 .reflection-panel {
   display: grid;
   gap: 9px;
+  padding: 21px;
 }
 
 .reflection-panel textarea {
@@ -1879,10 +2057,27 @@ button {
 }
 
 .reflection-panel label {
-  margin-top: 7px;
+  display: grid;
+  gap: 7px;
   color: var(--muted);
   font-size: 9px;
   font-weight: 750;
+}
+
+.week-reflection-panel {
+  grid-template-columns: 220px minmax(0, 1.25fr) minmax(0, 0.75fr);
+  align-items: start;
+  gap: 18px;
+  margin-top: 15px;
+}
+
+.week-reflection-heading h2 {
+  margin-top: 4px;
+}
+
+.week-reflection-panel textarea,
+.week-reflection-panel textarea.compact {
+  min-height: 92px;
 }
 
 .modal-backdrop {
@@ -1923,167 +2118,6 @@ button {
   display: flex;
   align-items: center;
   gap: 11px;
-}
-
-.week-tickets-panel > .week-panel-heading > span {
-  border-radius: 99px;
-  background: #edf3ff;
-  padding: 6px 9px;
-  color: var(--blue);
-  font-size: 8px;
-  font-weight: 800;
-  white-space: nowrap;
-}
-
-.week-ticket-form {
-  display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(115px, 0.8fr) auto;
-  gap: 8px;
-  align-items: end;
-  border-radius: 10px;
-  background: #f7f9fc;
-  padding: 10px;
-}
-
-.week-ticket-form label {
-  display: grid;
-  gap: 5px;
-  color: var(--muted);
-  font-size: 8px;
-  font-weight: 750;
-}
-
-.week-ticket-form select {
-  width: 100%;
-  min-width: 0;
-  height: 34px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: #fff;
-  padding: 0 9px;
-  color: var(--ink);
-  font-family: inherit;
-  font-size: 9px;
-  outline: none;
-}
-
-.week-ticket-form select:focus {
-  border-color: #8daee9;
-  box-shadow: 0 0 0 3px rgba(88, 130, 210, 0.12);
-}
-
-.week-ticket-form > button {
-  height: 34px;
-  border: 1px solid var(--blue);
-  border-radius: 7px;
-  background: var(--blue);
-  padding: 0 11px;
-  color: #fff;
-  cursor: pointer;
-  font-size: 9px;
-  font-weight: 800;
-  white-space: nowrap;
-}
-
-.week-ticket-form > button:disabled {
-  border-color: #b9c4d2;
-  background: #b9c4d2;
-  cursor: not-allowed;
-}
-
-.week-ticket-list {
-  display: grid;
-  gap: 7px;
-  margin-top: 12px;
-}
-
-.week-ticket-list article {
-  display: grid;
-  grid-template-columns: 68px minmax(0, 1fr) auto;
-  gap: 10px;
-  align-items: center;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  padding: 9px;
-}
-
-.week-ticket-list article.done {
-  background: #f7faf8;
-  opacity: 0.72;
-}
-
-.week-ticket-list time {
-  color: var(--blue);
-  font-size: 8px;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.week-ticket-list article > div:not(.week-ticket-actions) {
-  display: grid;
-  min-width: 0;
-  gap: 3px;
-}
-
-.week-ticket-list article strong {
-  overflow: hidden;
-  font-size: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.week-ticket-list article span,
-.week-ticket-empty span {
-  color: var(--muted);
-  font-size: 8px;
-}
-
-.week-ticket-actions {
-  display: flex;
-  gap: 4px;
-}
-
-.week-ticket-actions button {
-  border: 0;
-  border-radius: 6px;
-  background: #edf3ff;
-  padding: 6px 7px;
-  color: var(--blue);
-  cursor: pointer;
-  font-size: 8px;
-  font-weight: 750;
-}
-
-.week-ticket-actions button:last-child:not(:first-child) {
-  background: #f3f5f7;
-  color: #687688;
-}
-
-.week-ticket-actions button:disabled {
-  cursor: wait;
-  opacity: 0.55;
-}
-
-.week-ticket-empty {
-  display: grid;
-  place-items: center;
-  gap: 5px;
-  min-height: 84px;
-  border: 1px dashed #cfd7e2;
-  border-radius: 9px;
-  color: #657487;
-  text-align: center;
-}
-
-.week-ticket-empty strong {
-  font-size: 10px;
-}
-
-.week-tickets-panel > .save-feedback {
-  display: block;
-  min-height: 13px;
-  margin-top: 8px;
-  font-size: 8px;
 }
 
 .modal-heading-actions > button {
@@ -2266,13 +2300,24 @@ button {
     align-self: end;
   }
 
-  .week-layout {
-    grid-template-columns: 210px 1fr;
+  .week-planner-shell {
+    grid-template-columns: 210px minmax(0, 1fr);
   }
 
-  .week-tickets-panel,
-  .reflection-panel {
-    grid-column: 2;
+  .week-backlog-card {
+    flex-basis: 205px;
+  }
+
+  .week-days-grid .calendar-task-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .week-days-grid .calendar-task-actions > button {
+    grid-column: auto;
+  }
+
+  .week-reflection-panel {
+    grid-template-columns: 180px 1fr 1fr;
   }
 
   .roadmap-cards {
@@ -2330,26 +2375,34 @@ button {
   }
 
   .roadmap-cards,
-  .week-layout {
+  .week-planner-shell {
     grid-template-columns: 1fr;
   }
 
-  .week-tickets-panel,
-  .reflection-panel {
-    grid-column: auto;
+  .week-goals-sidebar {
+    grid-template-columns: minmax(180px, 0.7fr) minmax(0, 1.3fr);
   }
 
-  .week-ticket-form {
+  .week-board {
+    overflow-x: auto;
+  }
+
+  .week-backlog-strip {
+    min-width: 1120px;
+  }
+
+  .week-days-grid {
+    min-width: 1120px;
+    grid-template-columns: repeat(5, minmax(210px, 1fr));
+  }
+
+  .week-reflection-panel {
     grid-template-columns: 1fr;
   }
 
-  .week-ticket-list article {
-    grid-template-columns: 62px minmax(0, 1fr);
-  }
-
-  .week-ticket-actions {
-    grid-column: 1 / -1;
-    justify-content: flex-end;
+  .week-reflection-panel textarea,
+  .week-reflection-panel textarea.compact {
+    min-height: 110px;
   }
 
   .form-row {
