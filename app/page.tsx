@@ -345,11 +345,27 @@ function weekDetails(offset: number) {
     day: "numeric",
     month: "short",
   });
+  const weekdayFormat = new Intl.DateTimeFormat("nl-NL", {
+    weekday: "long",
+  });
+  const workdays = Array.from({ length: 5 }, (_, index) => {
+    const date = new Date(monday);
+    date.setDate(date.getDate() + index);
+    return {
+      key: localDateKey(date),
+      label: weekdayFormat.format(date),
+      date: format.format(date),
+      isToday: localDateKey(date) === localDateKey(DAY_REFERENCE),
+    } satisfies CalendarDay;
+  });
 
   return {
     key: `${thursday.getFullYear()}-W${String(week).padStart(2, "0")}`,
     label: `Week ${week}`,
     range: `${format.format(monday)} – ${format.format(sunday)}`,
+    startKey: localDateKey(monday),
+    endKey: localDateKey(sunday),
+    workdays,
   };
 }
 
@@ -359,6 +375,25 @@ function shortDate(value?: string | null) {
     day: "numeric",
     month: "short",
   }).format(new Date(`${value.slice(0, 10)}T12:00:00`));
+}
+
+function taskDateKey(task: Task) {
+  if (task.workDate) return localDateKey(new Date(task.workDate));
+  if (!task.day) return null;
+  const date = new Date(DAY_REFERENCE);
+  date.setDate(
+    date.getDate() +
+      (task.day === "yesterday" ? -1 : task.day === "tomorrow" ? 1 : 0),
+  );
+  return localDateKey(date);
+}
+
+function weekTicketDate(value: string) {
+  return new Intl.DateTimeFormat("nl-NL", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  }).format(new Date(`${value}T12:00:00`));
 }
 
 function parseStoredSession(value: string): ActiveSession | null {
@@ -460,6 +495,9 @@ export default function Home() {
   const [ticketSaveState, setTicketSaveState] =
     useState<SaveState>("idle");
   const [ticketSaveMessage, setTicketSaveMessage] = useState("");
+  const [weekTicketSaveState, setWeekTicketSaveState] =
+    useState<SaveState>("idle");
+  const [weekTicketSaveMessage, setWeekTicketSaveMessage] = useState("");
   const [ticketDeleteArmed, setTicketDeleteArmed] = useState(false);
   const [editingTicketId, setEditingTicketId] = useState<
     number | string | null
@@ -518,6 +556,50 @@ export default function Home() {
     [filteredTasks],
   );
   const selectedWeek = useMemo(() => weekDetails(weekOffset), [weekOffset]);
+  const weeklyTickets = useMemo(
+    () =>
+      tasks
+        .filter((task) => {
+          if (task.taskType === "Feature") return false;
+          const dateKey = taskDateKey(task);
+          if (!dateKey) return false;
+          return (
+            dateKey >= selectedWeek.startKey &&
+            dateKey <= selectedWeek.endKey
+          );
+        })
+        .sort((a, b) =>
+          String(taskDateKey(a)).localeCompare(String(taskDateKey(b))),
+        ),
+    [selectedWeek.endKey, selectedWeek.startKey, tasks],
+  );
+  const availableWeekSubtasks = useMemo(() => {
+    const activeIds = new Set(activeEpics.map((epic) => epic.id));
+    const priority = { Critical: 0, High: 1, Medium: 2, Low: 3 };
+    return tasks
+      .filter(
+        (task) =>
+          task.taskType !== "Feature" &&
+          task.status !== "done" &&
+          !task.workDate &&
+          !task.day,
+      )
+      .sort((a, b) => {
+        const activeDifference =
+          Number(Boolean(b.parentEpicId && activeIds.has(b.parentEpicId))) -
+          Number(Boolean(a.parentEpicId && activeIds.has(a.parentEpicId)));
+        return (
+          activeDifference ||
+          priority[a.priority ?? "Medium"] -
+            priority[b.priority ?? "Medium"] ||
+          a.title.localeCompare(b.title, "nl")
+        );
+      });
+  }, [activeEpics, tasks]);
+  const weeklyTicketHours = weeklyTickets.reduce(
+    (total, task) => total + (task.plannedHours ?? task.estimate),
+    0,
+  );
   const days = useMemo(
     () => calendarDays(calendarOffset),
     [calendarOffset],
@@ -706,7 +788,11 @@ export default function Home() {
         );
       }
     }
-    queueMicrotask(() => setWeeklyPlan(nextPlan));
+    queueMicrotask(() => {
+      setWeeklyPlan(nextPlan);
+      setWeekTicketSaveState("idle");
+      setWeekTicketSaveMessage("");
+    });
   }, [selectedWeek.key]);
 
   useEffect(() => {
@@ -780,7 +866,7 @@ export default function Home() {
 
   async function moveTask(id: number | string, day: CalendarDay) {
     const target = tasks.find((task) => String(task.id) === String(id));
-    if (!target) return;
+    if (!target) return { ok: false };
     const previous = {
       day: target.day,
       slot: target.slot,
@@ -799,7 +885,9 @@ export default function Home() {
     );
     selectTask(target);
 
-    if (notionState !== "connected" || typeof target.id !== "string") return;
+    if (notionState !== "connected" || typeof target.id !== "string") {
+      return { ok: true };
+    }
 
     setFeedback("saving", "Planning opslaan…");
     try {
@@ -808,6 +896,7 @@ export default function Home() {
         body: JSON.stringify({ pageId: target.id, workDate }),
       });
       setFeedback("saved", "Planning opgeslagen in Notion");
+      return { ok: true };
     } catch (error) {
       setTasks((current) =>
         current.map((task) =>
@@ -818,7 +907,56 @@ export default function Home() {
         "error",
         error instanceof Error ? error.message : "Opslaan mislukt",
       );
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : "Opslaan mislukt",
+      };
     }
+  }
+
+  async function planTicketForWeek(
+    event: React.FormEvent<HTMLFormElement>,
+  ) {
+    event.preventDefault();
+    if (weekTicketSaveState === "saving") return;
+
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    const ticketId = String(data.get("ticketId") ?? "");
+    const dateKey = String(data.get("dateKey") ?? "");
+    const day = selectedWeek.workdays.find((item) => item.key === dateKey);
+    const task = tasks.find((item) => String(item.id) === ticketId);
+
+    if (!task || !day) {
+      setWeekTicketSaveState("error");
+      setWeekTicketSaveMessage("Kies een subtask en een werkdag");
+      return;
+    }
+
+    setWeekTicketSaveState("saving");
+    setWeekTicketSaveMessage("Ticket inplannen…");
+    const result = await moveTask(task.id, day);
+    if (result.ok) {
+      form.reset();
+      setWeekTicketSaveState("saved");
+      setWeekTicketSaveMessage(`${task.title} staat op ${day.label}`);
+    } else {
+      setWeekTicketSaveState("error");
+      setWeekTicketSaveMessage(result.error ?? "Inplannen mislukt");
+    }
+  }
+
+  async function removeTicketFromWeek(task: Task) {
+    if (weekTicketSaveState === "saving") return;
+    setWeekTicketSaveState("saving");
+    setWeekTicketSaveMessage("Planning verwijderen…");
+    const result = await returnTaskToBacklog(task);
+    setWeekTicketSaveState(result.ok ? "saved" : "error");
+    setWeekTicketSaveMessage(
+      result.ok
+        ? `${task.title} is uit deze week gehaald`
+        : (result.error ?? "Planning verwijderen mislukt"),
+    );
   }
 
   async function returnTaskToBacklog(task: Task) {
@@ -2499,9 +2637,12 @@ export default function Home() {
                 />
               </div>
               <p>
-                Houd het bij maximaal drie belangrijke uitkomsten. Kleine
-                taken plan je vanuit Mijn dag.
+                Houd het bij maximaal drie belangrijke uitkomsten en plan de
+                subtasks die deze week aandacht krijgen.
               </p>
+              <strong className="week-ticket-summary">
+                {weeklyTickets.length} tickets · {weeklyTicketHours} uur
+              </strong>
               <small>Automatisch bewaard in deze planner</small>
             </aside>
 
@@ -2580,6 +2721,111 @@ export default function Home() {
                   </div>
                 ))}
               </div>
+            </div>
+
+            <div className="week-tickets-panel">
+              <div className="week-panel-heading">
+                <div>
+                  <p className="eyebrow">SUBTASKS</p>
+                  <h2>Tickets deze week</h2>
+                </div>
+                <span>{weeklyTicketHours} uur gepland</span>
+              </div>
+
+              <form
+                className="week-ticket-form"
+                key={selectedWeek.key}
+                onSubmit={planTicketForWeek}
+              >
+                <label>
+                  Open subtask
+                  <select
+                    name="ticketId"
+                    defaultValue=""
+                    disabled={availableWeekSubtasks.length === 0}
+                    required
+                  >
+                    <option value="" disabled>
+                      {availableWeekSubtasks.length
+                        ? "Kies een ticket"
+                        : "Geen open subtasks beschikbaar"}
+                    </option>
+                    {availableWeekSubtasks.map((task) => (
+                      <option key={task.id} value={String(task.id)}>
+                        {task.title} · {task.epic}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Werkdag
+                  <select
+                    name="dateKey"
+                    defaultValue={
+                      selectedWeek.workdays.find((day) => day.isToday)?.key ??
+                      selectedWeek.workdays[0]?.key
+                    }
+                  >
+                    {selectedWeek.workdays.map((day) => (
+                      <option key={day.key} value={day.key}>
+                        {day.label} · {day.date}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="submit"
+                  disabled={
+                    availableWeekSubtasks.length === 0 ||
+                    weekTicketSaveState === "saving"
+                  }
+                >
+                  + Inplannen
+                </button>
+              </form>
+
+              <div className="week-ticket-list">
+                {weeklyTickets.map((task) => (
+                  <article key={task.id} className={task.status}>
+                    <time dateTime={taskDateKey(task) ?? undefined}>
+                      {weekTicketDate(taskDateKey(task) as string)}
+                    </time>
+                    <div>
+                      <strong>{task.title}</strong>
+                      <span>
+                        {task.epic} · {task.plannedHours ?? task.estimate} uur
+                      </span>
+                    </div>
+                    <div className="week-ticket-actions">
+                      <button type="button" onClick={() => openEditTicket(task)}>
+                        Openen
+                      </button>
+                      {task.status !== "done" && (
+                        <button
+                          type="button"
+                          onClick={() => void removeTicketFromWeek(task)}
+                          disabled={weekTicketSaveState === "saving"}
+                        >
+                          Uit week
+                        </button>
+                      )}
+                    </div>
+                  </article>
+                ))}
+                {weeklyTickets.length === 0 && (
+                  <div className="week-ticket-empty">
+                    <strong>Nog geen tickets ingepland</strong>
+                    <span>Kies hierboven een open subtask en een werkdag.</span>
+                  </div>
+                )}
+              </div>
+
+              <span
+                className={`save-feedback ${weekTicketSaveState}`}
+                aria-live="polite"
+              >
+                {weekTicketSaveMessage}
+              </span>
             </div>
 
             <div className="reflection-panel">

@@ -1712,6 +1712,7 @@ button {
 
 .week-overview,
 .week-goals-panel,
+.week-tickets-panel,
 .reflection-panel {
   border: 1px solid var(--line);
   border-radius: 14px;
@@ -1747,6 +1748,12 @@ button {
   font-size: 8px;
 }
 
+.week-overview .week-ticket-summary {
+  margin-bottom: 7px;
+  color: #dce9f5;
+  font-size: 11px;
+}
+
 .week-progress {
   height: 6px;
   overflow: hidden;
@@ -1763,8 +1770,13 @@ button {
 }
 
 .week-goals-panel,
+.week-tickets-panel,
 .reflection-panel {
   padding: 21px;
+}
+
+.reflection-panel {
+  grid-column: 2 / -1;
 }
 
 .week-panel-heading {
@@ -1911,6 +1923,167 @@ button {
   display: flex;
   align-items: center;
   gap: 11px;
+}
+
+.week-tickets-panel > .week-panel-heading > span {
+  border-radius: 99px;
+  background: #edf3ff;
+  padding: 6px 9px;
+  color: var(--blue);
+  font-size: 8px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.week-ticket-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(115px, 0.8fr) auto;
+  gap: 8px;
+  align-items: end;
+  border-radius: 10px;
+  background: #f7f9fc;
+  padding: 10px;
+}
+
+.week-ticket-form label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 750;
+}
+
+.week-ticket-form select {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  padding: 0 9px;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 9px;
+  outline: none;
+}
+
+.week-ticket-form select:focus {
+  border-color: #8daee9;
+  box-shadow: 0 0 0 3px rgba(88, 130, 210, 0.12);
+}
+
+.week-ticket-form > button {
+  height: 34px;
+  border: 1px solid var(--blue);
+  border-radius: 7px;
+  background: var(--blue);
+  padding: 0 11px;
+  color: #fff;
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.week-ticket-form > button:disabled {
+  border-color: #b9c4d2;
+  background: #b9c4d2;
+  cursor: not-allowed;
+}
+
+.week-ticket-list {
+  display: grid;
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.week-ticket-list article {
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 9px;
+}
+
+.week-ticket-list article.done {
+  background: #f7faf8;
+  opacity: 0.72;
+}
+
+.week-ticket-list time {
+  color: var(--blue);
+  font-size: 8px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.week-ticket-list article > div:not(.week-ticket-actions) {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.week-ticket-list article strong {
+  overflow: hidden;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.week-ticket-list article span,
+.week-ticket-empty span {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.week-ticket-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.week-ticket-actions button {
+  border: 0;
+  border-radius: 6px;
+  background: #edf3ff;
+  padding: 6px 7px;
+  color: var(--blue);
+  cursor: pointer;
+  font-size: 8px;
+  font-weight: 750;
+}
+
+.week-ticket-actions button:last-child:not(:first-child) {
+  background: #f3f5f7;
+  color: #687688;
+}
+
+.week-ticket-actions button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.week-ticket-empty {
+  display: grid;
+  place-items: center;
+  gap: 5px;
+  min-height: 84px;
+  border: 1px dashed #cfd7e2;
+  border-radius: 9px;
+  color: #657487;
+  text-align: center;
+}
+
+.week-ticket-empty strong {
+  font-size: 10px;
+}
+
+.week-tickets-panel > .save-feedback {
+  display: block;
+  min-height: 13px;
+  margin-top: 8px;
+  font-size: 8px;
 }
 
 .modal-heading-actions > button {
@@ -2097,6 +2270,7 @@ button {
     grid-template-columns: 210px 1fr;
   }
 
+  .week-tickets-panel,
   .reflection-panel {
     grid-column: 2;
   }
@@ -2160,8 +2334,22 @@ button {
     grid-template-columns: 1fr;
   }
 
+  .week-tickets-panel,
   .reflection-panel {
     grid-column: auto;
+  }
+
+  .week-ticket-form {
+    grid-template-columns: 1fr;
+  }
+
+  .week-ticket-list article {
+    grid-template-columns: 62px minmax(0, 1fr);
+  }
+
+  .week-ticket-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
   }
 
   .form-row {
