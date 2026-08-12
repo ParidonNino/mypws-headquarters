@@ -1,0 +1,36 @@
+# Local development only. Does not touch production (see .openai/hosting.json)
+# or the existing Notion databases — this just runs `vinext dev` in a
+# container against the same Notion API the local `npm run dev` uses.
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    env_file:
+      # Not committed — copy .env.example to .env.local and fill in your own
+      # Notion credentials. Never baked into the image.
+      - .env.local
+    environment:
+      - WRANGLER_LOG_PATH=.wrangler/wrangler.log
+      # Bind mounts on Docker Desktop for Windows don't reliably forward
+      # native fs events into the container; this tells vite.config.ts to
+      # fall back to polling so hot reload actually works.
+      - DOCKER_DEV=true
+    volumes:
+      # Bind-mount the repo for hot reload...
+      - .:/app
+      # ...but keep these directories in named volumes so Linux-native
+      # binaries and build caches from inside the container never get
+      # overwritten by whatever is on the Windows host filesystem.
+      - node_modules:/app/node_modules
+      - vinext_cache:/app/.vinext
+      - wrangler_state:/app/.wrangler
+      - dist_build:/app/dist
+
+volumes:
+  node_modules:
+  vinext_cache:
+  wrangler_state:
+  dist_build:

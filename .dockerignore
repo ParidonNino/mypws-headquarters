@@ -1,0 +1,14 @@
+.git
+node_modules
+.pnpm-store
+.wrangler
+.vinext
+dist
+out
+work
+outputs
+coverage
+.env*
+!.env.example
+npm-debug.log*
+.DS_Store

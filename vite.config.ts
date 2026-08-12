@@ -10,6 +10,9 @@ const { d1, r2 } = hostingConfig;
 
 // macOS Seatbelt blocks FSEvents, so Codex previews need polling for HMR.
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
+// Docker Desktop's bind mount for the repo doesn't reliably forward native
+// fs change events into the container, so local Docker dev needs polling too.
+const isDockerDev = process.env.DOCKER_DEV === "true";
 
 const localBindingConfig = {
   main: "./worker/index.ts",
@@ -44,7 +47,7 @@ export default defineConfig(async () => {
   const { cloudflare } = await import("@cloudflare/vite-plugin");
 
   return {
-    server: isCodexSeatbeltSandbox
+    server: isCodexSeatbeltSandbox || isDockerDev
       ? { watch: { useFsEvents: false, usePolling: true } }
       : undefined,
     plugins: [
