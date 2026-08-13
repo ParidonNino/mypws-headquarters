@@ -14,6 +14,11 @@ export type AuthConfig = {
    * on anything reachable from outside your machine.
    */
   disabled: boolean;
+  /**
+   * Set only when a reverse proxy terminates TLS in front of the app. Without
+   * it the X-Forwarded-* headers are ignored, because any client can send them.
+   */
+  trustProxy: boolean;
 };
 
 export type AuthEnv = {
@@ -24,6 +29,7 @@ export type AuthEnv = {
   ALLOWED_EMAILS?: string;
   APP_ORIGIN?: string;
   AUTH_DISABLED?: string;
+  TRUST_PROXY?: string;
 };
 
 /**
@@ -42,6 +48,7 @@ export function readAuthConfig(
     allowedEmails: source.ALLOWED_EMAILS || undefined,
     appOrigin: source.APP_ORIGIN || undefined,
     disabled: source.AUTH_DISABLED === "true",
+    trustProxy: source.TRUST_PROXY === "true",
   };
 }
 
@@ -75,11 +82,32 @@ export function authConfigError(config: AuthConfig) {
  * steered by a forged Host header; fall back to the request's own origin for
  * local development.
  */
-export function callbackUrl(config: AuthConfig, requestUrl: string) {
-  const origin = config.appOrigin ?? new URL(requestUrl).origin;
-  return new URL("/api/auth/notion/callback", origin).toString();
+/**
+ * Whether the browser reached us over TLS.
+ *
+ * Behind a TLS-terminating proxy the app itself is spoken to over plain http,
+ * so the browser's real scheme survives only in X-Forwarded-Proto. That header
+ * is honoured solely when TRUST_PROXY says a proxy is actually in front —
+ * otherwise any client could set it and flip the cookie flags.
+ */
+export function isSecureRequest(request: Request, config: AuthConfig) {
+  if (new URL(request.url).protocol === "https:") return true;
+  if (!config.trustProxy) return false;
+  const forwarded = request.headers.get("x-forwarded-proto");
+  // Proxy chains append, so the client-facing value is the first entry.
+  return forwarded?.split(",")[0]?.trim().toLowerCase() === "https";
 }
 
-export function isSecureRequest(requestUrl: string) {
-  return new URL(requestUrl).protocol === "https:";
+/** The origin the browser sees, which behind a proxy is not the one we serve. */
+export function effectiveOrigin(request: Request, config: AuthConfig) {
+  const url = new URL(request.url);
+  const protocol = isSecureRequest(request, config) ? "https:" : url.protocol;
+  const host =
+    (config.trustProxy && request.headers.get("x-forwarded-host")) || url.host;
+  return `${protocol}//${host}`;
+}
+
+export function callbackUrl(config: AuthConfig, request: Request) {
+  const origin = config.appOrigin ?? effectiveOrigin(request, config);
+  return new URL("/api/auth/notion/callback", origin).toString();
 }

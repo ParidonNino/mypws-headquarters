@@ -12,6 +12,12 @@ import {
   verifySessionToken,
 } from "../lib/session.ts";
 import { isAllowedIdentity } from "../lib/notion-oauth.ts";
+import {
+  callbackUrl,
+  effectiveOrigin,
+  isSecureRequest,
+  readAuthConfig,
+} from "../lib/auth-config.ts";
 
 const SECRET = "unit-test-secret";
 const identity = {
@@ -122,6 +128,103 @@ test("treats an empty allowlist as workspace-wide access", () => {
   for (const allowedEmails of [undefined, "", "   ", " , "]) {
     assert.equal(isAllowedIdentity(base, { allowedEmails }), true);
   }
+});
+
+function req(url, headers = {}) {
+  return new Request(url, { headers });
+}
+
+test("treats a direct https request as secure", () => {
+  const config = readAuthConfig({});
+  assert.equal(isSecureRequest(req("https://localhost/"), config), true);
+  assert.equal(isSecureRequest(req("http://localhost/"), config), false);
+});
+
+test("ignores X-Forwarded-Proto unless TRUST_PROXY is set", () => {
+  // The important case: without a declared proxy, any client could send this
+  // header, so it must not influence the cookie flags.
+  const untrusted = readAuthConfig({});
+  assert.equal(
+    isSecureRequest(
+      req("http://localhost/", { "x-forwarded-proto": "https" }),
+      untrusted,
+    ),
+    false,
+  );
+
+  const trusted = readAuthConfig({ TRUST_PROXY: "true" });
+  assert.equal(
+    isSecureRequest(
+      req("http://localhost/", { "x-forwarded-proto": "https" }),
+      trusted,
+    ),
+    true,
+  );
+  assert.equal(
+    isSecureRequest(
+      req("http://localhost/", { "x-forwarded-proto": "http" }),
+      trusted,
+    ),
+    false,
+  );
+  // Proxy chains append; the client-facing scheme is the first entry.
+  assert.equal(
+    isSecureRequest(
+      req("http://localhost/", { "x-forwarded-proto": "https, http" }),
+      trusted,
+    ),
+    true,
+  );
+});
+
+test("only TRUST_PROXY=true exactly enables proxy headers", () => {
+  for (const value of ["TRUE", "1", "yes", ""]) {
+    assert.equal(
+      isSecureRequest(
+        req("http://localhost/", { "x-forwarded-proto": "https" }),
+        readAuthConfig({ TRUST_PROXY: value }),
+      ),
+      false,
+      `TRUST_PROXY=${JSON.stringify(value)}`,
+    );
+  }
+});
+
+test("derives the origin the browser sees, not the internal one", () => {
+  const direct = readAuthConfig({});
+  assert.equal(
+    effectiveOrigin(req("http://localhost:3000/x"), direct),
+    "http://localhost:3000",
+  );
+
+  // Behind the proxy the app is spoken to as app:3000 over http, while the
+  // browser is on https://localhost:8443. Comparing the internal origin against
+  // APP_ORIGIN would redirect to APP_ORIGIN forever.
+  const proxied = readAuthConfig({ TRUST_PROXY: "true" });
+  assert.equal(
+    effectiveOrigin(
+      req("http://app:3000/api/auth/notion", {
+        "x-forwarded-proto": "https",
+        "x-forwarded-host": "localhost:8443",
+      }),
+      proxied,
+    ),
+    "https://localhost:8443",
+  );
+});
+
+test("builds the callback from APP_ORIGIN when set", () => {
+  const config = readAuthConfig({ APP_ORIGIN: "https://localhost:8443" });
+  assert.equal(
+    callbackUrl(config, req("http://app:3000/api/auth/notion")),
+    "https://localhost:8443/api/auth/notion/callback",
+  );
+
+  // Falls back to the request's own origin when APP_ORIGIN is unset.
+  assert.equal(
+    callbackUrl(readAuthConfig({}), req("http://localhost:3000/api/auth/notion")),
+    "http://localhost:3000/api/auth/notion/callback",
+  );
 });
 
 test("enforces the allowlist when set, case-insensitively", () => {

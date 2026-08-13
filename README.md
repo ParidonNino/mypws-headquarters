@@ -48,9 +48,51 @@ Compose voordat de container start.
 docker compose up --build
 ```
 
-De planner staat dan op http://127.0.0.1:3000. De poort is bewust alleen aan
+De planner staat dan op **http://localhost:3000**. De poort is bewust alleen aan
 loopback gebonden, zodat de planner en de Notion-sleutel erachter niet
-bereikbaar zijn voor anderen in hetzelfde netwerk.
+bereikbaar zijn voor anderen in hetzelfde netwerk; `localhost` komt daar prima
+bij, want het resolvet naar 127.0.0.1.
+
+Gebruik consequent `localhost` en niet `127.0.0.1`. Cookies horen bij een
+hostnaam, dus wie op 127.0.0.1 begint en via Notion terugkomt op localhost,
+verliest de state-cookie en krijgt "ongeldige aanmeldpoging". De app stuurt je
+daarom automatisch naar `APP_ORIGIN` als je op een ander origin begint.
+
+### Optioneel: met https via nginx
+
+Er zit een TLS-proxy in het project die je los kunt aanzetten:
+
+```bash
+docker compose --profile proxy up --build
+```
+
+De planner staat dan óók op **https://localhost:8443**. Zonder `--profile proxy`
+blijft alles precies zoals hierboven, dus je hebt altijd een werkende
+terugvaloptie.
+
+Zet er in `.env.local` deze twee bij:
+
+```
+APP_ORIGIN=https://localhost:8443
+TRUST_PROXY=true
+```
+
+en registreer `https://localhost:8443/api/auth/notion/callback` als extra
+redirect URI op de Notion-connection.
+
+Twee dingen om te weten:
+
+- Het certificaat is self-signed en wordt bij de eerste start gegenereerd in een
+  named volume. Je browser waarschuwt één keer; daarna kun je het certificaat
+  vertrouwen of doorklikken. Notion controleert het certificaat niet — dat doet
+  alleen je browser.
+- `TRUST_PROXY=true` hoort alléén bij deze opstelling. Het laat de app
+  `X-Forwarded-Proto` vertrouwen, en zonder echte proxy ervoor zou een client
+  die header zelf kunnen sturen.
+
+Op http (zonder proxy) is https lokaal geen veiligheidswinst — er gaat niets
+over een netwerk. De winst is dat het lijkt op een echte deployment en dat het
+`Secure`-cookiepad getest wordt.
 
 ## Aanmelden via Notion
 
@@ -79,8 +121,9 @@ Create new connection):
    e-mailadressen** aan. Zonder die capability levert `GET /v1/users/me` geen
    e-mailadres en mislukt het inloggen.
 3. Zet als **redirect URI** exact
-   `http://127.0.0.1:3000/api/auth/notion/callback` — hetzelfde origin als
-   `APP_ORIGIN`.
+   `http://localhost:3000/api/auth/notion/callback` — hetzelfde origin als
+   `APP_ORIGIN`. Notion accepteert geen IP-adres, dus `localhost` en niet
+   `127.0.0.1`.
 4. Haal in de **Configuration**-tab de OAuth client ID en client secret op en
    zet die met een verse `SESSION_SECRET` in `.env.local`.
 5. Vul `ALLOWED_EMAILS` met je eigen e-mailadres. Meld daarna één keer aan: de

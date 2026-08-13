@@ -32,8 +32,35 @@ services:
       - wrangler_state:/app/.wrangler
       - dist_build:/app/dist
 
+  # Optional TLS-terminating proxy. Only starts with:
+  #   docker compose --profile proxy up --build
+  # Plain `docker compose up` ignores this service entirely, so the working
+  # http://localhost:3000 path stays available as a known-good fallback.
+  #
+  # When using it, set in .env.local:
+  #   APP_ORIGIN=https://localhost:8443
+  #   TRUST_PROXY=true
+  # and register https://localhost:8443/api/auth/notion/callback as the Notion
+  # redirect URI.
+  proxy:
+    profiles: ["proxy"]
+    build:
+      context: .
+      dockerfile: docker/nginx/Dockerfile
+    ports:
+      # Loopback only, same reasoning as the app service. 8443 rather than 443
+      # to avoid clashing with anything already holding the privileged port.
+      - "127.0.0.1:8443:443"
+    depends_on:
+      - app
+    volumes:
+      # Keep the generated certificate across restarts so the browser only has
+      # to be convinced once.
+      - proxy_certs:/etc/nginx/certs
+
 volumes:
   node_modules:
   vinext_cache:
   wrangler_state:
   dist_build:
+  proxy_certs:
