@@ -3,6 +3,10 @@ const DEFAULT_ROADMAP_DATA_SOURCE_ID =
   "dbe06fab-cee1-42c4-80a3-5757a6c11030";
 const DEFAULT_WORKBLOCKS_DATA_SOURCE_ID =
   "5130cdd2-c742-4cc7-8417-37832fa90b48";
+// A single work session cannot plausibly run longer than a day. Without a
+// bound, a timer left running over a weekend logs ~60 hours into Werkblokken
+// on the next pause, because sessions resume from their original startedAt.
+const MAX_SESSION_HOURS = 24;
 
 type NotionProperty = {
   type?: string;
@@ -184,6 +188,12 @@ export async function getNotionTasksResponse(
   token?: string,
   configuredDataSourceId?: string,
   configuredWorkblocksDataSourceId?: string,
+  /**
+   * The signed-in Notion account, echoed back so the client can offer an
+   * "alleen mijn taken" filter. Task owners carry a Notion user id, so the id
+   * is what the filter matches on; the email is for display.
+   */
+  viewer?: { email: string; userId: string } | null,
 ) {
   if (!token || token === "PLAK_HIER_DE_NOTION_SLEUTEL") {
     return Response.json({
@@ -378,6 +388,7 @@ export async function getNotionTasksResponse(
       tasks,
       epics,
       people,
+      viewer: viewer ?? null,
     });
   } catch (error) {
     return Response.json(
@@ -1091,9 +1102,12 @@ export async function updateNotionWorkblockResponse(
         );
       }
 
-      const actualHours = Math.max(
-        0,
-        (now.getTime() - Date.parse(payload.startedAt)) / 3_600_000,
+      const actualHours = Math.min(
+        MAX_SESSION_HOURS,
+        Math.max(
+          0,
+          (now.getTime() - Date.parse(payload.startedAt)) / 3_600_000,
+        ),
       );
       const workblockResponse = await updatePage(token, payload.workblockId, {
         "Work end": { date: { start: nowIso } },

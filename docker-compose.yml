@@ -7,7 +7,10 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "3000:3000"
+      # Loopback-only. An unqualified "3000:3000" publishes on every host
+      # interface, which would expose the planner — and the Notion token
+      # behind it — to anyone on the same network (café, hotel, client office).
+      - "127.0.0.1:3000:3000"
     env_file:
       # Not committed — copy .env.example to .env.local and fill in your own
       # Notion credentials. Never baked into the image.

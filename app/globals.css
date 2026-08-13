@@ -378,6 +378,58 @@ button {
   outline: none;
 }
 
+.viewer-scope {
+  display: grid;
+  gap: 7px;
+  margin-bottom: 15px;
+  padding-bottom: 13px;
+  border-bottom: 1px solid var(--line);
+}
+
+.only-mine-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.only-mine-toggle input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--blue);
+  cursor: pointer;
+}
+
+.viewer-identity {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.viewer-identity > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sign-out-link {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+.sign-out-link:hover {
+  color: var(--ink);
+}
+
 .active-epic-card {
   margin-bottom: 15px;
   padding: 14px;

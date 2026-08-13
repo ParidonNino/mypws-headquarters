@@ -12,7 +12,9 @@ type Task = {
   url?: string;
   title: string;
   epic: string;
-  parentEpicId?: string;
+  // The API sends `null` (not `undefined`) when a task has no parent epic,
+  // so this must allow null or comparisons against it silently misfire.
+  parentEpicId?: string | null;
   directParentId?: string | null;
   taskType?: "Feature" | "Subtask";
   priority?: "Critical" | "High" | "Medium" | "Low";
@@ -35,6 +37,12 @@ type Person = {
   name: string;
   avatarUrl?: string | null;
   email?: string | null;
+};
+
+/** The signed-in Notion account, as reported by /api/notion/tasks. */
+type Viewer = {
+  email: string;
+  userId: string;
 };
 
 type ActiveSession = {
@@ -323,6 +331,30 @@ function elapsedSince(startedAt: string) {
   );
 }
 
+// ISO 8601 week number. The previous inline approximation added Jan 1's
+// weekday to the day offset, which only lands on the right week when that sum
+// is at most 7 — so every week of a year starting on a Friday or Saturday
+// (2027, 2028) came out one too high. Computed in UTC so a DST transition
+// inside the range cannot shift the result across a week boundary.
+function isoWeekNumber(date: Date) {
+  const target = new Date(
+    Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()),
+  );
+  // Shift to the Thursday of this ISO week — the week's year-defining day.
+  target.setUTCDate(target.getUTCDate() - ((target.getUTCDay() + 6) % 7) + 3);
+  // Jan 4 is always in ISO week 1; walk to its Thursday for the baseline.
+  const firstThursday = new Date(Date.UTC(target.getUTCFullYear(), 0, 4));
+  firstThursday.setUTCDate(
+    firstThursday.getUTCDate() - ((firstThursday.getUTCDay() + 6) % 7) + 3,
+  );
+  return (
+    1 +
+    Math.round(
+      (target.getTime() - firstThursday.getTime()) / (7 * 86_400_000),
+    )
+  );
+}
+
 function weekDetails(offset: number) {
   const now = new Date();
   const monday = new Date(now);
@@ -334,13 +366,7 @@ function weekDetails(offset: number) {
 
   const thursday = new Date(monday);
   thursday.setDate(thursday.getDate() + 3);
-  const yearStart = new Date(thursday.getFullYear(), 0, 1);
-  const week = Math.ceil(
-    ((thursday.getTime() - yearStart.getTime()) / 86_400_000 +
-      yearStart.getDay() +
-      1) /
-      7,
-  );
+  const week = isoWeekNumber(thursday);
   const format = new Intl.DateTimeFormat("nl-NL", {
     day: "numeric",
     month: "short",
@@ -492,6 +518,8 @@ export default function Home() {
     null,
   );
   const [people, setPeople] = useState<Person[]>([]);
+  const [viewer, setViewer] = useState<Viewer | null>(null);
+  const [onlyMine, setOnlyMine] = useState(false);
 
   const selected =
     tasks.find((task) => task.id === selectedId) ?? tasks[0] ?? EMPTY_TASK;
@@ -508,26 +536,34 @@ export default function Home() {
     () => [...new Set(tasks.map((task) => task.epic))].sort(),
     [tasks],
   );
+  // "Alleen mijn taken" narrows by the Notion Owner property. Task owners
+  // carry a Notion user id, and the session's userId is that same id, so this
+  // needs no lookup through the member list.
+  const scopedTasks = useMemo(() => {
+    if (!onlyMine || !viewer) return tasks;
+    return tasks.filter((task) => task.owner?.id === viewer.userId);
+  }, [onlyMine, tasks, viewer]);
   const filteredTasks = useMemo(() => {
-    if (filter === "Alle epics") return tasks;
+    if (filter === "Alle epics") return scopedTasks;
     if (filter === "Actieve epics") {
-      if (activeEpics.length === 0) return tasks;
+      if (activeEpics.length === 0) return scopedTasks;
       const activeIds = new Set(activeEpics.map((epic) => epic.id));
-      return tasks.filter(
+      return scopedTasks.filter(
         (task) =>
           task.parentEpicId && activeIds.has(task.parentEpicId),
       );
     }
     const epicName = filter;
-    if (!epicName) return tasks;
-    return tasks.filter((task) => task.epic === epicName);
-  }, [activeEpics, filter, tasks]);
+    if (!epicName) return scopedTasks;
+    return scopedTasks.filter((task) => task.epic === epicName);
+  }, [activeEpics, filter, scopedTasks]);
   const backlog = useMemo(
     () =>
       filteredTasks
         .filter(
           (task) =>
             !task.day &&
+            !task.workDate &&
             task.status !== "done" &&
             task.taskType !== "Feature",
         )
@@ -560,7 +596,7 @@ export default function Home() {
   const availableWeekSubtasks = useMemo(() => {
     const activeIds = new Set(activeEpics.map((epic) => epic.id));
     const priority = { Critical: 0, High: 1, Medium: 2, Low: 3 };
-    return tasks
+    return scopedTasks
       .filter(
         (task) =>
           task.taskType !== "Feature" &&
@@ -579,7 +615,7 @@ export default function Home() {
           a.title.localeCompare(b.title, "nl")
         );
       });
-  }, [activeEpics, tasks]);
+  }, [activeEpics, scopedTasks]);
   const weeklyTicketHours = weeklyTickets.reduce(
     (total, task) => total + (task.plannedHours ?? task.estimate),
     0,
@@ -661,7 +697,13 @@ export default function Home() {
     let cancelled = false;
     let savedSession: ActiveSession | null = null;
 
-    const savedTasks = window.localStorage.getItem("powerselect-planner-tasks");
+    // Only seed from the demo cache on first mount. On a manual "Ververs"
+    // this effect re-runs, and replaying the cache would flash stale demo
+    // tasks over live Notion data and reset the selection.
+    const savedTasks =
+      syncVersion === 0
+        ? window.localStorage.getItem("powerselect-planner-tasks")
+        : null;
     if (savedTasks) {
       try {
         const localTasks = JSON.parse(savedTasks) as Task[];
@@ -704,7 +746,10 @@ export default function Home() {
       .then(async (response) => {
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.error ?? "Notion-fout");
-        if (!payload.configured || payload.tasks.length === 0) {
+        // An empty roadmap is a legitimate connected state, not demo mode.
+        // Treating it as demo used to discard real epics/people and route
+        // every later write to the local-only branch.
+        if (!payload.configured) {
           if (!cancelled) setNotionState("demo");
           return;
         }
@@ -717,6 +762,7 @@ export default function Home() {
           );
           setEpics((payload.epics as Epic[] | undefined) ?? []);
           setPeople((payload.people as Person[] | undefined) ?? []);
+          setViewer((payload.viewer as Viewer | null | undefined) ?? null);
           const firstTask =
             connectedTasks.find(
               (task) => savedSession && String(task.id) === savedSession.taskId,
@@ -737,15 +783,26 @@ export default function Home() {
             window.localStorage.removeItem("powerselect-active-workblock");
           }
           setTasks(connectedTasks);
-          setSelectedId(firstTask.id);
-          setNote(firstTask.nextAction ?? "");
-          setProgressInput(String(taskProgressPercent(firstTask)));
-          setElapsedSeconds(
-            (firstTask.loggedSeconds ?? 0) +
-              (savedSession && String(firstTask.id) === savedSession.taskId
-                ? elapsedSince(savedSession.startedAt)
-                : 0),
-          );
+          // `firstTask` is undefined when the roadmap is empty — the array
+          // index above is typed as always-present but is not.
+          if (firstTask) {
+            setSelectedId(firstTask.id);
+            setNote(firstTask.nextAction ?? "");
+            setProgressInput(String(taskProgressPercent(firstTask)));
+            setElapsedSeconds(
+              (firstTask.loggedSeconds ?? 0) +
+                (savedSession && String(firstTask.id) === savedSession.taskId
+                  ? elapsedSince(savedSession.startedAt)
+                  : 0),
+            );
+          } else {
+            setSelectedId("");
+            setNote("");
+            setProgressInput("0");
+            setElapsedSeconds(0);
+          }
+          // Drop the demo cache so a later refresh can never resurrect it.
+          window.localStorage.removeItem("powerselect-planner-tasks");
           setNotionState("connected");
         }
       })
@@ -846,7 +903,23 @@ export default function Home() {
     );
   }
 
+  // While a sync is in flight the incoming response will overwrite whatever
+  // the user changes, so accepting the edit and reporting "opgeslagen" is a
+  // lie: nothing is sent and the change visibly reverts a moment later.
+  function syncInProgress() {
+    if (notionState !== "loading") return false;
+    setFeedback("error", "Notion wordt nog geladen — probeer het opnieuw");
+    return true;
+  }
+
+  // `selected` falls back to EMPTY_TASK, whose id is the empty string. A
+  // `typeof id !== "string"` check passes it straight through to Notion.
+  function hasSelection() {
+    return selected.id !== "";
+  }
+
   async function moveTask(id: number | string, day: CalendarDay) {
+    if (syncInProgress()) return { ok: false };
     const target = tasks.find((task) => String(task.id) === String(id));
     if (!target) return { ok: false };
     const previous = {
@@ -900,6 +973,7 @@ export default function Home() {
     if ((!task.workDate && !task.day) || task.status === "done") {
       return { ok: true };
     }
+    if (syncInProgress()) return { ok: false };
 
     const previous = {
       day: task.day,
@@ -977,6 +1051,7 @@ export default function Home() {
     ) {
       return;
     }
+    if (syncInProgress()) return;
 
     const parsed = Number(progressInput.replace(",", "."));
     if (!Number.isFinite(parsed) || parsed < 0 || parsed > 100) {
@@ -1001,7 +1076,7 @@ export default function Home() {
       return;
     }
 
-    setFeedback("saving", "Voortgang opslaanâ€¦");
+    setFeedback("saving", "Voortgang opslaan…");
     try {
       await apiRequest("/api/notion/tasks", {
         method: "PATCH",
@@ -1037,6 +1112,19 @@ export default function Home() {
   ) {
     event.preventDefault();
     if (saveState === "saving" || selected.id === "") return;
+    if (syncInProgress()) return;
+
+    // Number("") is 0 and Number.isInteger(0) is true, so blank fields used
+    // to pass every check below and silently write a total of zero — wiping
+    // the logged time of anyone who cleared the inputs to back out.
+    if (
+      timeDraft.hours.trim() === "" ||
+      timeDraft.minutes.trim() === "" ||
+      timeDraft.seconds.trim() === ""
+    ) {
+      setTimeEditMessage("Vul een geldige tijd in");
+      return;
+    }
 
     const hours = Number(timeDraft.hours);
     const minutes = Number(timeDraft.minutes);
@@ -1187,6 +1275,7 @@ export default function Home() {
 
   async function startTask() {
     if (saveState === "saving" || selected.status === "running") return;
+    if (!hasSelection() || syncInProgress()) return;
 
     if (notionState !== "connected" || typeof selected.id !== "string") {
       const startedAt = new Date().toISOString();
@@ -1276,6 +1365,7 @@ export default function Home() {
 
   async function pauseTask() {
     if (saveState === "saving" || selected.status !== "running") return;
+    if (!hasSelection() || syncInProgress()) return;
 
     if (notionState !== "connected" || typeof selected.id !== "string") {
       const session =
@@ -1321,6 +1411,7 @@ export default function Home() {
 
   async function finishTask() {
     if (saveState === "saving" || selected.status === "done") return;
+    if (!hasSelection() || syncInProgress()) return;
 
     if (notionState !== "connected" || typeof selected.id !== "string") {
       const session =
@@ -1400,6 +1491,7 @@ export default function Home() {
   }
 
   async function saveNote(value = note) {
+    if (!hasSelection() || syncInProgress()) return;
     if (notionState !== "connected" || typeof selected.id !== "string") {
       setTasks((current) =>
         current.map((task) =>
@@ -1435,14 +1527,15 @@ export default function Home() {
   function updateWeeklyPlan(
     updater: (current: WeeklyPlan) => WeeklyPlan,
   ) {
-    setWeeklyPlan((current) => {
-      const next = updater(current);
-      window.localStorage.setItem(
-        `powerselect-week-${selectedWeek.key}`,
-        JSON.stringify(next),
-      );
-      return next;
-    });
+    // Writing to localStorage inside the updater made it impure — React 19
+    // invokes updaters twice in development and may replay them. Derive the
+    // next plan from the current render's value and persist alongside.
+    const next = updater(weeklyPlan);
+    setWeeklyPlan(next);
+    window.localStorage.setItem(
+      `powerselect-week-${selectedWeek.key}`,
+      JSON.stringify(next),
+    );
   }
 
   function openTicketForm(
@@ -1463,9 +1556,11 @@ export default function Home() {
   }
 
   function openEditTicket(task: Task) {
-    setSelectedId(task.id);
-    setNote(task.nextAction ?? "");
-    setProgressInput(String(taskProgressPercent(task)));
+    // Use selectTask so the open time editor and the elapsed counter are
+    // reset too. Setting only selectedId here left a stale time draft
+    // pointing at the previously selected task, and submitting it wrote
+    // that task's seconds onto this one.
+    selectTask(task);
     setEditingTicketId(task.id);
     setTicketDraft({
       title: task.title,
@@ -1510,11 +1605,14 @@ export default function Home() {
         : ticketDraft.schedule === "custom"
           ? workDateForCalendarDate(ticketDraft.customDate, "09:00")
           : workDateFor(ticketDraft.schedule, "09:00");
+    // Normalise both sides: the API sends null for "no epic" while the
+    // picker yields undefined, so `null === undefined` made this false and
+    // wiped the subtask's Parent task relation in Notion on every save.
     const preserveDirectParent =
-      editingTask &&
-      editingTask.parentEpicId === parentEpic?.id;
+      editingTask !== undefined &&
+      (editingTask.parentEpicId ?? null) === (parentEpic?.id ?? null);
     const targetParentId = preserveDirectParent
-      ? editingTask.directParentId ?? parentEpic?.id ?? null
+      ? editingTask?.directParentId ?? parentEpic?.id ?? null
       : parentEpic?.id ?? null;
 
     setTicketSaveState("saving");
@@ -1594,12 +1692,17 @@ export default function Home() {
             ...ticketPayload,
           }),
         });
+        // "custom" is a form value, not a DayKey. Assigning it to task.day
+        // produced a task the backlog filter treated as planned and the day
+        // grid could not place. Map the chosen date onto a real day instead.
         const nextDay =
           ticketDraft.schedule === "keep"
             ? editingTask?.day
             : ticketDraft.schedule === "none"
               ? undefined
-              : ticketDraft.schedule;
+              : ticketDraft.schedule === "custom"
+                ? relativeDayForDate(ticketDraft.customDate)
+                : ticketDraft.schedule;
         setTasks((current) =>
           current.map((task) =>
             String(task.id) === String(editingTicketId)
@@ -1632,8 +1735,18 @@ export default function Home() {
         );
         setSelectedId(editingTicketId);
         setNote(ticketDraft.nextAction);
+        setTimeEditOpen(false);
+        setTimeEditMessage("");
         if (editingTask) {
           setProgressInput(String(taskProgressPercent(editingTask)));
+          setElapsedSeconds(
+            (editingTask.loggedSeconds ?? 0) +
+              (activeSession &&
+              String(editingTask.id) === activeSession.taskId &&
+              editingTask.status === "running"
+                ? elapsedSince(activeSession.startedAt)
+                : 0),
+          );
         }
       } else {
         const result = await apiRequest<{ task: Task }>(
@@ -1656,6 +1769,9 @@ export default function Home() {
         setSelectedId(result.task.id);
         setNote(result.task.nextAction ?? "");
         setProgressInput(String(taskProgressPercent(result.task)));
+        setTimeEditOpen(false);
+        setTimeEditMessage("");
+        setElapsedSeconds(result.task.loggedSeconds ?? 0);
       }
       setFilter(
         parentEpic?.status === "In Progress"
@@ -1927,6 +2043,25 @@ export default function Home() {
               ))}
             </select>
           </div>
+
+          {viewer && (
+            <div className="viewer-scope">
+              <label className="only-mine-toggle">
+                <input
+                  type="checkbox"
+                  checked={onlyMine}
+                  onChange={(event) => setOnlyMine(event.target.checked)}
+                />
+                <span>Alleen mijn taken</span>
+              </label>
+              <p className="viewer-identity">
+                <span title={viewer.email}>{viewer.email}</span>
+                <a className="sign-out-link" href="/api/auth/logout">
+                  Afmelden
+                </a>
+              </p>
+            </div>
+          )}
 
           {activeEpics.length > 0 && activeEpic && <div className="active-epic-card">
             <div className="epic-card-top">

@@ -1,7 +1,10 @@
 # Local development image for Powerselect Werkplanner.
 # Not used for production — production deploys via the existing
 # Cloudflare Sites pipeline described in .openai/hosting.json.
-FROM node:22.13.0-bookworm-slim
+# Node 22.18+ is required: `npm test` imports .ts files directly and relies on
+# type stripping, which is only unflagged from 22.18. The old 22.13.0 pin could
+# not run this project's own test suite.
+FROM node:22-bookworm-slim
 
 WORKDIR /app
 
@@ -19,6 +22,15 @@ RUN npm ci
 # Source is normally overlaid by the docker-compose bind mount for hot
 # reload; this COPY only matters when the image is run standalone.
 COPY . .
+
+# Create the directories docker-compose backs with named volumes and hand all
+# of /app to the unprivileged `node` user before dropping privileges: Docker
+# seeds a fresh named volume from the image directory, ownership included, so
+# these stay writable without running the dev server as root.
+RUN mkdir -p /app/.vinext /app/.wrangler /app/dist \
+    && chown -R node:node /app
+
+USER node
 
 EXPOSE 3000
 

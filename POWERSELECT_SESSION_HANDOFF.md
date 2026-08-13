@@ -20,7 +20,7 @@ We bouwen een gebruiksvriendelijke, Nederlandstalige persoonlijke werkplanner bo
 
 ## Productie en project
 
-- Vaste lokale projectmap: `C:\Users\nino.van.paridon\Documents\Codex\Powerselect-Werkplanner`
+- Vaste lokale projectmap: `C:\Users\nino.van.paridon\Documents\GitHub\mypws-headquarters`
 - Live site: <https://powerselect-werkplanner.nino-van-paridon.chatgpt.site/>
 - Sites-project-ID: `appgprj_6a68b19af5348191ab58c03d6e200735`
 - De bestaande Sites-configuratie staat in `.openai/hosting.json`; hergebruik altijd dit project.
@@ -187,15 +187,12 @@ Een bredere telling in Notion gaf 88 niet-template-items, één actieve epic en 
    - Klik indien nodig op de Notion-statusknop om opnieuw te synchroniseren.
    - Bevestig dat de zes open Datafetcher-taken weer in de zijbalk staan.
 
-2. **Maak de taakhiërarchie robuuster**
-   - De app gaat nu meestal uit van een directe relatie tussen taak en epic.
-   - Sommige subtasks kunnen onder een Feature hangen, die vervolgens onder een Epic hangt.
-   - Los de bovenliggende epic op via de volledige ancestor-keten.
-   - Voorkom dat het bewerken van een geneste subtask de directe parent onbedoeld vervangt door de epic.
+2. ~~**Maak de taakhiërarchie robuuster**~~ — afgerond. De bovenliggende epic
+   wordt via de volledige ancestor-keten opgelost (`lib/notion-tasks.ts`), en
+   het bewerken van een geneste subtask behoudt de directe parent.
 
-3. **Voeg paginering toe**
-   - Roadmap en Workblocks worden nu met `page_size: 100` opgehaald.
-   - De huidige database past nog binnen die grens, maar toekomstige items kunnen ontbreken.
+3. ~~**Voeg paginering toe**~~ — afgerond. `queryDataSource` en `listUsers`
+   volgen `has_more` / `next_cursor` volledig.
 
 4. **Beslis wat de timer precies moet optellen**
    - Nu worden alle historische `Actual hours` per taak opgeteld.
@@ -219,7 +216,8 @@ Een bredere telling in Notion gaf 88 niet-template-items, één actieve epic en 
 - `app/api/notion/tasks/route.ts`: Roadmap-taken ophalen, aanmaken en aanpassen
 - `app/api/notion/workblocks/route.ts`: timers en werkblokken
 - `lib/notion-tasks.ts`: Notion REST-integratie, mapping, validatie en Workblocks
-- `tests/notion-workblocks.test.mjs`: integratielogica; momenteel acht tests
+- `tests/notion-workblocks.test.mjs`: integratielogica; 12 tests, geen build nodig
+- `tests/rendered-html.test.mjs`: 2 tests op de server-rendered HTML; vereist een build
 - `.env.example`: configuratievoorbeeld
 - `.env.local`: lokale geheimen; nooit tonen of committen
 - `.openai/hosting.json`: bestaand Sites-project
@@ -230,26 +228,20 @@ Deze nieuwe projectmap heeft een gewone `.git` in de projectroot met de volledig
 
 De meest recente stand:
 
-- 8 van 8 tests geslaagd
+- 12 van 12 unit-tests geslaagd
+- 2 van 2 HTML-tests geslaagd
+- `tsc --noEmit` geslaagd
 - ESLint geslaagd
 - productiebuild geslaagd
 
-Gebruikte Windows-runtime:
+Zie de README voor de commando's (`npm run check`, `npm run test:build`).
 
-```text
-C:\Users\nino.van.paridon\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe
-```
-
-Gebruik in PowerShell:
+Let op: er staat op deze machine geen Node.js in `PATH`. De eerder
+gedocumenteerde Codex-runtime bestaat niet meer. Docker is wel aanwezig, dus
+de checks kunnen in een container:
 
 ```powershell
-$runtimeBin='C:\Users\nino.van.paridon\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin'
-$fallbackBin='C:\Users\nino.van.paridon\.cache\codex-runtimes\codex-primary-runtime\dependencies\bin\fallback'
-$env:PATH="$runtimeBin;$fallbackBin;$env:PATH"
-$env:WRANGLER_LOG_PATH='.wrangler/wrangler.log'
-& "$runtimeBin\node.exe" --test tests\notion-workblocks.test.mjs
-.\node_modules\.bin\eslint.cmd app lib tests\notion-workblocks.test.mjs
-.\node_modules\.bin\vinext.cmd build
+docker run --rm -v "${PWD}:/src" -w /src node:22 sh -c "npm ci && npm run check"
 ```
 
 ## Recente deploymentcommits
